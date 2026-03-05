@@ -6,6 +6,6 @@ Questa repository include i materiali e le risorse utilizzati nelle esercitazion
 - Pipeline processamento e analisi dati
   
 - [Codice RMarkdown per riprodurre la pipeline sui propri dati](https://github.com/Luca-Menghini/TecnologieWearableMobile/raw/refs/heads/main/codice.Rmd)
-Nota: devi cliccare tasto destro > Salva con nome > togli ".txt" dal nome del file
+(Nota: Clicca tasto destro > Salva con nome > Togli ".txt" dal nome del file)
   
 - ...
