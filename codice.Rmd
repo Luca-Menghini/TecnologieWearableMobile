@@ -1,0 +1,243 @@
+---
+title: "Gestire e prevenire lo stress lavorativo con tecnologie wearable e mobile"
+subtitle: |
+ | Esercitazione 3: 
+ | Pre-processamento, analisi e visualizzazione dati con R
+author: "Luca Menghini"
+date: |
+ | 6 marzo 2026 
+ |
+ | ***
+ |
+ | Corso di laurea triennale in Scienze e Tecniche di Psicologia Cognitiva, Università di Trento
+ |
+ | A.A. 2025-2026
+output: 
+ html_document:
+    df_print: paged
+    toc: true
+    toc_float: true
+    toc_depth: 6
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### RProject
+
+Arrivati a questo punto **è il momento di usare R!** 
+
+In particolare, **creiamo un "R Project"** nella cartella del progetto creata al punto 1 qui sopra. In questo modo, tutti i file inclusi in quella cartella saranno facilmente importabili in R. Inoltre, da questo momento in poi, potrai **usare questo documento** per analizzare i tuoi dati!
+
+1. Apri RStudio e clicca su `File` (in alto a sinistra) &rightarrow; `New project` &rightarrow; `Existing directory` &rightarrow; seleziona la cartella del progetto creata al punto 1 qui sopra
+
+2. Scarica il file `ESERCITAZIONE3.Rmd` dalla pagina Moodle dell'insegnamento, copialo nella cartella del progetto e aprilo su RStudio
+
+3. Installa tutti i pacchetti usati nel file cliccando su "Install" nel banner giallo che si vede in alto (in alternativa, esegui il comando `install.packages("nome_pacchetto")` nella Console di RStudio)
+
+```{r , echo = FALSE}
+knitr::include_graphics("img/7.PNG")
+```
+
+<br>
+
+## 1.2. Lettura dati
+
+Nel passo successivo, dobbiamo importare in R i dati che abbiamo salvato nella cartella `data`. Ovviamente l'importazione dei dati dipende dal loro formato e da quanti file abbiamo. Vediamo qui di seguito i passi per importare in R i file XLSX esportati da https://m-path.io/:
+
+1. __Importare file singolo__: Per importare un singolo file XLSX possiamo usare la funzione `read_xlsx()` del pacchetto `readxl` e salvarne il risultato associandolo all'oggetto `d` con il simbolo `<-`:
+
+```{r , message=FALSE}
+# svuota lo spazio di lavoro
+rm(list=ls())
+
+# apre pacchetto necessario per leggere file con formato XLSX
+library(readxl)
+
+# legge il file nella cartella data e lo salva nell'oggetto "d"
+d <- read_xlsx("data/P1.xlsx",skip=1)
+
+# aggiunge campo codice partecipante (per consistenza con i prossimi step)
+d <- cbind(ID="S1",d)
+
+# mostra le prime 6 righe
+head(d)
+```
+
+2. __Importare file multipli__: Per importare file multipli (cioé un file separato per ogni partecipante) e unirli in un unico dataset, dopo aver rinominato ogni file con il nome/codice del partecipante, possiamo usare questo codice:
+
+```{r , message=FALSE}
+# salva i nomi di tutti i percorsi ai file XLSX nella cartella data
+paths <- list.files("data",pattern="xlsx",full.names=TRUE)
+
+# legge tutti i dati e li salva nell'oggetto "d"
+d <- data.frame(matrix(nrow=0,ncol=ncol(read_xlsx(paths[1]))+1))
+for(path in paths){ # per ogni file...
+  # legge nuovi dati
+  new <- cbind(ID=gsub("data\\/","",gsub("\\.xlsx","",path)), # ID partecipante
+               read_xlsx(path,skip=1)) # legge dati partecipante
+  # aggiunge colonne mancanti
+  if(colnames(d)[1]!="X1"){
+    new[,colnames(d)[!colnames(d) %in% colnames(new)]] <- NA 
+    d[,colnames(new)[!colnames(new) %in% colnames(d)]] <- NA }
+  # aggiunge i nuovi dati ai dati già letti
+  d <- rbind(d,new) }
+
+# mostra tutto il dataset
+d
+```
+
+<br>
+
+## 1.3. Ricodifica dati
+
+Una volta importati i dati, procediamo alla loro ricodifica per prepararli per le analisi successive:
+
+1. __Pulizia nomi variabili__: con questo codice ripuliamo i nomi delle variabili dalle informazioni aggiuntive di m-path, lasciando solo il nome che avevamo impostato sulla piattaforma.
+```{r , message=FALSE}
+# per ogni variabile, prende solo la prima parola
+for(i in 1:ncol(d)){
+  colnames(d)[i] <- strsplit(colnames(d)[i],split=" ")[[1]][1] }
+
+# mostra nomi variabili
+colnames(d)
+```
+
+2. __Variabile `day`__: con questo codice ricodifichiamo la variabile `Date` per calcolare il giorno di partecipazione `day` da 1 = primo giorno a 7 = settimo giorno.
+```{r , message=FALSE,echo=FALSE}
+d <- d[!(is.na(d$sd1) & is.na(d$jd1) & is.na(d$ee1)),]
+```
+```{r , message=FALSE}
+# converte variabile "Date" da testo a data e ora
+for(i in 1:12){ d$Date <- gsub(month.abb[i],i,d$Date) }
+d$Date <- as.POSIXct(substr(d$Date, # recording date
+                            6,nchar(d$Date)),format="%d %m %Y %H:%M:%S")
+
+# calcola variabile "day"
+for(id in unique(d$ID)){
+  d$day[d$ID==id] <- 
+    difftime(d$Date[d$ID==id],
+             as.Date(min(d$Date[d$ID==id])),units="days") + 1 }
+d$day <- as.integer(d$day) # converto in classe "integer"
+
+# mostra esempi
+d[1:6,c("ID","Date","day")]
+```
+
+3. __Variabile `beep`__: se il nostro protocollo prevede **più di una misurazione al giorno**, con questo codice creiamo la variabile `beep` con un valore diverso in base al numero progressivo di misurazioni previste (es. 1 = mattina, 2 = pomeriggio, 3 = sera).
+```{r , message=FALSE}
+###############################################################################
+################################################ MODIFICA QUI #################
+###############################################################################
+# indica qui il nome di una variabile presente solo nel PRIMO questionario
+var_t1 <- "sd1"
+
+# indica qui il nome di una variabile presente solo nel SECONDO questionario
+var_t2 <- "jd1" # nota: lascia il campo vuoto ("") se ne avete solo 1
+
+# indica qui il nome di una variabile presente solo nel TERZO questionario
+var_t3 <- "ee1" # nota: lascia il campo vuoto ("") se ne avete solo 1 o 2
+###############################################################################
+###############################################################################
+###############################################################################
+
+# crea variabile beep
+d$beep <- ifelse(!is.na(d[,var_t1]),1,
+                 ifelse(!is.na(d[,var_t2]),2,
+                        ifelse(!is.na(d[,var_t3]),3,NA)))
+
+# mostra variabili
+d[,c("ID","day","beep",var_t1,var_t2,var_t3)]
+
+# # usa questo se hai solo 2 beep
+# d[,c("ID","Date","day","beep",var_t1,var_t2)]
+# # crea variabile beep
+# d$beep <- ifelse(!is.na(d[,var_t1]),1,
+#                  ifelse(!is.na(d[,var_t2]),2,NA))
+```
+
+4. __Variabili invertite__: Se il nostro questionario includeva delle domande formulate in modo opposto a quello che avevamo in mente di misurare (es. item su problemi di sonno per misurare la qualità del sonno), possiamo **invertire il punteggio** sottraendolo al valore massimo della scala + 1. Ad esempio, qui vediamo il codice per invertire 4 item con punteggio da 1 a 7:
+```{r , message=FALSE}
+d$sd1 <- 7 + 1 - d$sd1
+d$sd2 <- 7 + 1 - d$sd2
+d$sd3 <- 7 + 1 - d$sd3
+d$sd4 <- 7 + 1 - d$sd4
+```
+
+5. __Pulizia livelli variabili categoriali__: Infine, come abbiamo fatto sopra per i nomi delle variabili, possiamo accorciare i nomi dei livelli presenti in eventuali variabili categoriali
+```{r , message=FALSE}
+d$teleWork[!is.na(d$teleWork)][seq(1,length(d$teleWork[!is.na(d$teleWork)]),2)
+                               ] <- "Sì, ho lavorato da remoto"
+```
+```{r , message=FALSE}
+# mostra i livelli della variabile teleWork
+unique(d$teleWork)
+
+# sostituisco livello 1 con "remote"
+d$teleWork <- gsub("Sì\\, ho lavorato da remoto",
+                   "remote",
+                   d$teleWork)
+
+# sostituisco livello 2 con "onsite"
+d$teleWork <- gsub("No, ho lavorato prevalentemente nel mio luogo di lavoro",
+                   "onsite",
+                   d$teleWork)
+
+# trasformo in classe "factor" 
+d$teleWork <- factor(d$teleWork,levels=c("remote","onsite"))
+
+# vediamo il numero di casi
+summary(d$teleWork)
+```
+6. __Orari del sonno__: Se abbiamo variabili di tipo "orario" (es. orario di addormentamento e risveglio), possiamo usare questo codice per farle riconoscere da R come tali:
+```{r , message=FALSE}
+# inserisci il nome della variabile temporale
+btime <- "bedTime"
+
+# converte la variabile in formato temporale
+d[,btime] <- 
+  as.POSIXct(paste(as.Date(d[,"Date"]),
+                   d[,btime]),format="%Y-%m-%d %H:%M:%S")
+
+# inserisci il nome della variabile temporale
+wtime <- "wakeTime"
+
+# converte la variabile in formato temporale
+d[,wtime] <- 
+  as.POSIXct(paste(as.Date(d[,"Date"]),
+                   d[,wtime]),format="%Y-%m-%d %H:%M:%S")
+
+# mostra esempi
+d[d$beep==1,c("ID","day",btime,wtime)]
+```
+
+ARRIVATO QUI
+
+## 1.4. Proprietà psicometriche
+
+## 1.5. Calcolo dei punteggi compositi
+
+## 1.6. Dati sonno
+
+## 1.7. Dati pressione
+
+## 1.8. Centratura delle variabili
+
+# 2. Analisi
+
+## 2.1. Statistiche descrittive
+
+### Tendenza centrale
+
+### Variabilità
+
+### Frequenze e percentuali
+
+## 2.2. Fluttuazioni giornaliere
+
+## 2.3. Distribuzioni bivariate
+
+## 2.4. Correlazioni
+
+# 3. Report
