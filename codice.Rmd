@@ -24,6 +24,123 @@ output:
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+<br>
+
+Nel presente documento, vediamo i passaggi fondamentali dall'esportazione dei dati alla creazione di grafici e report:
+
+1. **Pre-processamento**: \newline Esportazione, lettura e rielaborazione di dati longitudinali intensivi, cenni di psicometria
+
+2. **Analisi**: \newline Principali tecniche di analisi descrittive visualizzazione di dati longitudinali intensivi
+
+3. **Report**: \newline Spunti e template per report individuali e di gruppo
+
+<br>
+
+# 1. Pre-processamento
+
+Il pre-processamento dei dati riguarda tutti i passaggi necessari per **trasformare i dati** dal formato con cui sono stati registrati nella piattaforma di raccolta (es. m-Path) a quello richiesto dalle analisi che intendiamo fare:
+
+1. Esportazione dati
+
+2. Lettura e dati
+
+3. Ricodifica dati
+
+4. Proprietà psicometriche
+
+5. Calcolo dei punteggi compositi
+
+6. Dati sonno
+
+7. Dati pressione
+
+8. Centratura delle variabili
+
+<br>
+
+## 1.1. Esportazione
+
+\fontsize{8pt}{12}\selectfont
+Ogni piattaforma/software usa un particolare formato (es. `XLSX`, `CSV`) e una particolare **organizzazione o struttura dei dati** (es. tabella integrata oppure una per partecipante), talvolta personalizzabile.
+
+<br>
+
+### ESM: m-path
+
+Su [m-Path](https://m-path.io/), i dati si esportano separatamente per ogni partecipante:
+
+1. Accedi al tuo account su https://m-path.io/ e seleziona il simbolo del grafico nel riquadro del partecipante
+
+```{r , echo = FALSE}
+knitr::include_graphics("img/1.PNG")
+```
+
+2. Seleziona tutte le variabili nel menu Settings sulla destra (sia per quantitaive items che per qualitative items)
+
+```{r , echo = FALSE}
+knitr::include_graphics("img/2.PNG")
+```
+
+3. Seleziona `Table` e poi il pulsante verde con il simbolo del documento con la `X` (Excel) per scaricare i dati del partecipante e rinomina il file scaricato con il nome (o il codice) del partecipante
+
+```{r , echo = FALSE}
+knitr::include_graphics("img/3.PNG")
+```
+
+4. Ripeti la procedura per tutti gli altri partecipanti
+
+<br>
+
+### Qs preliminare
+
+Nei protocolli di assessment ambulatoriale è comune inserire un **questionario preliminare** all'inizio (prima di iniziare il protocollo giornaliero) per raccoglie informazioni socio-anagrafiche (es. genere, età), occupazionali (es. posizione lavorativa, tipo di contratto) e altre variabili "disposizionali" ("di tratto", che non variano da un giorno all'altro).
+
+Questo l'avrete implementato con Google Forms oppure con un'altra piattaforma, per cui l'esportazione del file dipende dalla specifica piattaforma. Ad es. su Google Form bisogna cliccare ...
+
+```{r , echo = FALSE}
+knitr::include_graphics("img/9.PNG")
+```
+
+__ATTENZIONE__: per svolgere i passaggi successivi è fondamentale che il dataset del questionario preliminare includa una **colonna `ID`** con i codici dei partecipanti, che devono avere gli stessi valori di quelli assunti dalla colonna `ID` nel dataset con le misure giornaliere.
+
+<br>
+
+### Accelerometro AX3
+
+1. Accedere al sito https://axivity.com/downloads/ax3, scaricare e intsallare AX3 Software **OmGui** (solo per Windows!)
+
+2. Aprire il software, collegare l'accelerometro e cliccare su **Stop**
+
+3. Una volta stoppata la registrazione, cliccare su **Download** per scaricare i dati registrati
+
+```{r , echo = FALSE}
+knitr::include_graphics("img/4.PNG")
+```
+
+4. I dati vengono scaricati in formato CWA all'interno della cartella indicata di fianco alla scritta "Workspace:"
+
+```{r , echo = FALSE}
+knitr::include_graphics("img/5.PNG")
+```
+
+<br>
+
+### Cartella `data/`
+
+Siccome lavoreremo in R, conviene organizzare il nostro spazio di lavoro in modo da ottimizzare le analisi (in questo modo potrai usare facilmente tutti gli script che seguono!). Tra questi, un passaggio fondamentale è la creazione di una cartella che da prassi chiamiamo "data", in cui inserire tutti i dati esportati dalle varie piattaforme:
+
+1. Crea sul tuo computer la **cartella del progetto** e dagli un nome riconoscibile (es. "progetto-wearable")
+
+2. Al suo interno, crea la **cartella "data"** in cui vanno copiati tutti i file XLSX esportati da https://m-path.io/ e tutti i file CWA esportati dagli accelerometri
+
+```{r , echo = FALSE}
+knitr::include_graphics("img/6.PNG")
+```
+
+3. Se hai anche un dataset con le risposte al questionario preliminare, conviene creare una **sottocartella dentro alla cartella `/data`** (puoi chiamarla `/data/questionario-preliminare`) per non fare confusione con i file esportati da m-path
+
+<br>
+
 ### RProject
 
 Arrivati a questo punto **è il momento di usare R!** 
@@ -42,7 +159,23 @@ knitr::include_graphics("img/7.PNG")
 
 <br>
 
+4. [Apri lo script con il codice .Rmd](https://github.com/Luca-Menghini/TecnologieWearableMobile/raw/refs/heads/main/codice.Rmd) usato per generare questo documento 
+
+5. Clicca con il tasto destro e fai **Salva con nome**
+
+6. Salva il file nella cartella del tuo RProject (*non* nella sottocartella "data"!) facendo attenzione a cancellare la scritta "`.txt`" dal nome del file &rightarrow; il nome del file deve essere "**`codice.Rmd`**"
+
+7. Apri il file con RStudio
+
+```{r , echo = FALSE}
+knitr::include_graphics("img/8.PNG")
+```
+
+<br>
+
 ## 1.2. Lettura dati
+
+### m-path
 
 Nel passo successivo, dobbiamo importare in R i dati che abbiamo salvato nella cartella `data`. Ovviamente l'importazione dei dati dipende dal loro formato e da quanti file abbiamo. Vediamo qui di seguito i passi per importare in R i file XLSX esportati da https://m-path.io/:
 
@@ -90,17 +223,43 @@ d
 
 <br>
 
+### Qs preliminare
+
+L'inserimento di un questionario preliminare implica la necessità di **unire diversi dataset** (quello del questionario preliminare con quello dei questionari giornalieri codificati qui sopra) facendo attenzione di collegare le misure raccolte dallo stesso partecipante. Per farlo è fondamentale che entrambi i dataset abbiano una **colonna `ID`** con i codici dei partecipanti, che devono avere gli stessi valori nei due dataset (es. "P1", "P2", "P3", ecc.).
+
+Di seguito vediamo l'importazione delle risposte al qs preliminare (ma dipende dal formato esportato in base alla piattaforma che avete usato!) e la loro unione al dataset `d` con le risposte ai questionari giornalieri.
+
+```{r , message=FALSE}
+# importo le risposte al qs preliminare (nota: dipende dal formato del file!)
+prelqs <- read.csv2("data/questionario-preliminare/prelqs.csv")
+
+# visualizzo le risposte
+prelqs # la colonna ID deve avere gli stessi valori del dataset giornaliero!
+
+# unisco i due dataset sulla base della colonna ID
+library(plyr)
+d <- plyr::join(d,prelqs,by="ID",type="left")
+
+# mostro il dataset (scorri alla fine per vedere le colonne del prelqs)
+d
+```
+
+<br>
+
 ## 1.3. Ricodifica dati
 
 Una volta importati i dati, procediamo alla loro ricodifica per prepararli per le analisi successive:
 
 1. __Pulizia nomi variabili__: con questo codice ripuliamo i nomi delle variabili dalle informazioni aggiuntive di m-path, lasciando solo il nome che avevamo impostato sulla piattaforma.
 ```{r , message=FALSE}
+# mostra nomi variabili originali
+colnames(d)
+
 # per ogni variabile, prende solo la prima parola
 for(i in 1:ncol(d)){
   colnames(d)[i] <- strsplit(colnames(d)[i],split=" ")[[1]][1] }
 
-# mostra nomi variabili
+# mostra nomi variabili ripuliti
 colnames(d)
 ```
 
@@ -122,7 +281,7 @@ for(id in unique(d$ID)){
 d$day <- as.integer(d$day) # converto in classe "integer"
 
 # mostra esempi
-d[1:6,c("ID","Date","day")]
+head(d[,c("ID","Date","day")])
 ```
 
 3. __Variabile `beep`__: se il nostro protocollo prevede **più di una misurazione al giorno**, con questo codice creiamo la variabile `beep` con un valore diverso in base al numero progressivo di misurazioni previste (es. 1 = mattina, 2 = pomeriggio, 3 = sera).
@@ -142,19 +301,16 @@ var_t3 <- "ee1" # nota: lascia il campo vuoto ("") se ne avete solo 1 o 2
 ###############################################################################
 ###############################################################################
 
-# crea variabile beep
-d$beep <- ifelse(!is.na(d[,var_t1]),1,
+# # usa questo codice se avevi solo 2 BEEP
+# d$beep <- ifelse(!is.na(d[,var_t1]),1, 
+#                  ifelse(!is.na(d[,var_t2]),2,NA))
+# d[,c("ID","day","beep",var_t1,var_t2)] # mostra variabili
+
+# # usa questo codice se avevi 3 BEEP
+d$beep <- ifelse(!is.na(d[,var_t1]),1, 
                  ifelse(!is.na(d[,var_t2]),2,
                         ifelse(!is.na(d[,var_t3]),3,NA)))
-
-# mostra variabili
-d[,c("ID","day","beep",var_t1,var_t2,var_t3)]
-
-# # usa questo se hai solo 2 beep
-# d[,c("ID","Date","day","beep",var_t1,var_t2)]
-# # crea variabile beep
-# d$beep <- ifelse(!is.na(d[,var_t1]),1,
-#                  ifelse(!is.na(d[,var_t2]),2,NA))
+d[,c("ID","day","beep",var_t1,var_t2,var_t3)] # mostra variabili
 ```
 
 4. __Variabili invertite__: Se il nostro questionario includeva delle domande formulate in modo opposto a quello che avevamo in mente di misurare (es. item su problemi di sonno per misurare la qualità del sonno), possiamo **invertire il punteggio** sottraendolo al valore massimo della scala + 1. Ad esempio, qui vediamo il codice per invertire 4 item con punteggio da 1 a 7:
@@ -166,7 +322,7 @@ d$sd4 <- 7 + 1 - d$sd4
 ```
 
 5. __Pulizia livelli variabili categoriali__: Infine, come abbiamo fatto sopra per i nomi delle variabili, possiamo accorciare i nomi dei livelli presenti in eventuali variabili categoriali
-```{r , message=FALSE}
+```{r , message=FALSE, echo = FALSE}
 d$teleWork[!is.na(d$teleWork)][seq(1,length(d$teleWork[!is.na(d$teleWork)]),2)
                                ] <- "Sì, ho lavorato da remoto"
 ```
@@ -209,20 +365,431 @@ d[,wtime] <-
                    d[,wtime]),format="%Y-%m-%d %H:%M:%S")
 
 # mostra esempi
-d[d$beep==1,c("ID","day",btime,wtime)]
+d[d$beep==1,c("ID","day","beep",btime,wtime)]
 ```
 
-ARRIVATO QUI
+<br>
 
 ## 1.4. Proprietà psicometriche
 
+\fontsize{8pt}{12}\selectfont
+Prima di analizzare i nostri dati, è opportuno valutare alcune **qualità psicometriche** delle misure utilizzate per accertarci che 'funzionino' come dovrebbero:
+
+- __Validità__: Il test misura ciò che dovrebbe misurare?
+
+- __Attendibilità__: Il test fornisce misure affidabili?
+
+```{r , echo = FALSE, out.width="180px", fig.align="center"}
+knitr::include_graphics("img/validita.PNG")
+```
+
+\fontsize{6.5pt}{12}\selectfont
+Nota: Validità e attendibilità sono concetti che fanno parte della Teoria Classica dei Test e si applicano principalmente al testing psicologico (misure self-report), mentre per le misure fisiologiche e comportamentali andrebbero valutati altri aspetti (es. plausibilità dei valori ottenuti, artefatti nel segnale, ecc.)
+
+### Validità (*validity*)
+
+\fontsize{8pt}{12}\selectfont
+Il test misura ciò che dovrebbe misurare? \newline
+
+Indicatori qualitativi:
+
+- __Validità di facciata__ (pre): rilevanza del test per le persone non esperte (solitamente la popolazione target del test)
+
+- __Validità di contenuto__ (post): grado in cui la formulazione degli item riflette il dominio di contenuto del costrutto misurato
+
+Indicatori quantitativi:
+
+- __Validità di criterio__ (pre/post): correlazione con un criterio esterno o un altro test già considerato valido
+
+- __Validità di costrutto__ (pre/post): grado in cui il test misura ciò che dovrebbe misurare (analisi fattoriale: saturazioni degli item e dimensionalità)
+
+- __Validità convergente/divergente__ (pre/post): correlazione alta con test che misurano lo stesso costrutto, bassa con test che misurano costrutti diversi
+
+### Attendibilità (*reliability*)
+
+\fontsize{8pt}{12}\selectfont
+Il test fornisce misure affidabili? L'attendibilità fa riferimento alla stima di quanto la variabilità nelle misure ottenute sia dovuta alla 'varianza vera' ($\sigma^2_V$) del costrutto misurato anziché alla 'varianza d'errore' ($\sigma^2_E$): $\sigma^2_{Tot} = \sigma^2_V + \sigma^2_E$
+
+- __Inter-rater__: congruenza delle valutazioni espresse da due o più valutatori indipendenti (osservatori) - solo per etero-valutazioni
+
+- __Test-retest__: congruenza tra le misurazioni ottenute dagli stessi individui in tempi diversi (solo per costrutti 'stabili')
+
+- __Split-half__: correlazione tra due parti dello stesso test (ha senso solo se c'è un certo numero di item)
+
+- __Consistenza/Coerenza interna__: correlazioni tra gli item che compongono il test (es. correlazione media, correlazione item-totale, $\alpha$ di Cronbach)
+
+<br>
+
+In particolare, l'attendibilità delle scale self-report (i.e., misure composte da più item che misurano lo stesso costrutto/dimensione) viene spesso quantificata in termini di **coerenza interna** della scala (quanto gli item della scala sono correlati tra loro).
+
+- __Misure retrospettive__: spesso valutate tramite la correlazione media tra gli item e il coefficiente $\alpha$ di Cronbach. Quest'ultimo stima il rapporto tra varianza 'vera' e varianza totale. Valori > .70 sono considerati indicativi di un'adeguata attendibilità
+
+- __Misure ESM__: indici di attendibilità alternativi che tengono in cosiderazione le due componenti che caratterizzano queste misure: quella 'stabile' (**tratto**) che valutata confrontando i punteggi medi dei partecipanti, e quella 'variabile' (**stato**) che valutata confrontando le deviazioni delle specifiche osservazioni dalla media dei partecipanti
+
+<br>
+
+Qui vediamo il codice per calcolare gli indici di attendibilità delle nostre misure giornaliere (nota: solo per misure quantitative dove più item sono stati usati per misurare lo stesso costrutto/dimensione):
+
+- $R_{kF}$: Attendibilità nel discriminare sistematiche differenze individuali (*between-subjects*), in base a tutte le misure disponibili per ogni soggetto
+
+- $R_C$: Sensibilità al cambiamento = Attendibilità nel discriminare sistematiche differenze intra-individuali (*within-subject*) nel tempo
+
+```{r , warning=FALSE}
+###############################################################################
+################################################ MODIFICA QUI #################
+###############################################################################
+items <- c("jd1","jd2","jd3") # seleziona gli item della scala
+###############################################################################
+###############################################################################
+
+# calcolo indici di attendibilità livello-specifici
+library(psych)
+multilevel.reliability(
+  
+  x = d, grp = "ID", Time = "day", items = items,
+  lmer=TRUE,aov=FALSE
+  
+  )[c("RkF","Rc")]
+```
+
+\fontsize{6.5pt}{12}\selectfont
+Per approfondire: \newline Cranford, J. A., Shrout, P. E., Iida, M., Rafaeli, E., Yip, T., & Bolger, N. (2006). A Procedure for Evaluating Sensitivity to Within-Person Change: Can Mood Measures in Diary Studies Detect Change Reliably? Personality and Social Psychology Bulletin, 32(7), 917–929. https://doi.org/10.1177/0146167206287721
+
+## Cosa fare se una misura non risulta attendibile?
+
+\fontsize{10pt}{12}\selectfont
+Quando una misura non risulta adeguatamente attendibile nel campione considerato (es. indice di attendibilità $< .70$), possiamo:
+
+1. Escludere la misura dalle nostre analisi (questa sarebbe la scelta più saggia, visto che la misura "non ha funzionato bene" nel nostro campione)
+
+2. Includerla lo stesso nelle analisi ma evidenziare questo limite nel report, indicando di interpretare con particolare cautela i risultati relativi a questa misura<
+
+<br>
+
 ## 1.5. Calcolo dei punteggi compositi
+
+Quando utilizziamo delle misure che includono due o più indicatori (es. scale self-report con due o più item, biosegnali registrati più volte nel tempo), possiamo aggregarne i valori calcolando il **punteggio composito** (solitamente il punteggio medio o la somma) per ogni osservazione.
+
+Questo va fatto per ogni scala multi-item (ovviamente non per quelle ad item singolo).
+```{r , warning=FALSE}
+###############################################################################
+################################################ MODIFICA QUI #################
+###############################################################################
+items <- c("jd1","jd2","jd3") # seleziona gli item della scala
+nome_scala <- "JobDemand" # imposta qui il nome della variabile
+###############################################################################
+###############################################################################
+
+# calcola punteggio composito
+d[,nome_scala] <- apply(d[,items],1,mean)
+
+# mostra esempi
+d[,c("ID","day","beep",items,nome_scala)]
+
+# ripeto per le altre scale (nota: vanno cambiati i nomi delle variabili!)
+items <- c("ee1","ee2","ee3") # burnout
+nome_scala <- "Burnout"
+d[,nome_scala] <- apply(d[,items],1,mean)
+items <- c("sd1","sd2","sd3","sd4") # qualità del sonno
+nome_scala <- "QualSonno"
+d[,nome_scala] <- apply(d[,items],1,mean)
+d[,c("ID","day","beep","JobDemand","Burnout","QualSonno")] # mostra esempi
+```
+
+<br>
 
 ## 1.6. Dati sonno
 
-## 1.7. Dati pressione
+Adesso siamo ok per le variabili self-report e dobbiamo sistemare quelle registrate con i sensori wearable/portable. Partiamo con le misure del sonno, che dobbiamo ricavare a partire dal segnale grezzo dell'accelerometro che abbiamo esportato dal bracciale.
 
-## 1.8. Centratura delle variabili
+In particolare, useremo un **algoritmo per lo scoring del sonno** che si basa sulle variazioni nell'angolo del polso (inclinazione rispetto all'asse parallelo alla superficie terrestre) e dell'intensità del movimento (quanto ci si muove vs. quanto si sta fermi) per classificare ogni epoca da 1 minuto come sonno o veglia. In questo modo si creano dei periodi più o meno lunghi con una serie di epoche di sonno consecutive, chiamati "**periodi di intattività**" (es. sonno ma anche stare fermi e rilassati senza muoversi). Tra questi, l'algoritmo va a cercare quelli che corrispondono agli orari indicati dai partecipanti nel diario del sonno, per determinare il periodo di sonno (*sleep period time*).
+
+Per usarlo, è quindi fondamentale **esportare tutti gli orari del diario nel sonno (_sleep log_)** in un file che salveremo "sleeplog.csv".
+```{r , warning=FALSE}
+###############################################################################
+################################################ MODIFICA QUI #################
+###############################################################################
+beep <- 1 # numero del BEEP corrispondente ai questionari mattina
+n.nights <- 5 # numero di notti
+bedtime <- "bedTime" # nome colonna orario di andare a dormire
+waketime <- "wakeTime" # nome colonna orario risveglio
+###############################################################################
+###############################################################################
+
+# extracting sleep times morning questionnaire
+sleeplog <- d[d$beep==beep,c("ID","day",bedtime,waketime)]
+sleeplog$day <- sleeplog$day - 1 # per iniziare dal giorno 1
+# sleeplog <- sleeplog[sleeplog$day!=5,] # x rimuovere un giorno
+
+# aggiungere righe vuote per valori mancanti
+for(id in levels(as.factor(sleeplog$ID))){
+  for(i in 1:n.nights){ # adding empty lines for missing data
+    if(nrow(sleeplog[sleeplog$ID==id & sleeplog$day==i,])==0){
+      sleeplog <- rbind(sleeplog,
+                        data.frame(ID=id,day=i,bedTime=NA,wakeTime=NA)) }}}
+sleeplog <- sleeplog[order(sleeplog$ID,sleeplog$day),]
+
+# creating sleepLog dataset
+sleepLog <- data.frame(matrix(nrow=0,ncol=1+n.nights*2))
+for(id in levels(as.factor(sleeplog$ID))){ 
+  IDdata <- sleeplog[sleeplog$ID==id,]
+  for(i in 1:n.nights){ 
+    if(!i %in% IDdata$day){ # missing times as NA
+      IDdata <- rbind(IDdata,
+                      data.frame(ID=IDdata$ID[1],day=i,
+                                 bedTime=NA,wakeTime=NA)) }}
+  IDdata.sl <- data.frame(ID=id,
+                          onset_N1 = IDdata[IDdata$day==1,bedtime],
+                          wakeup_N1 = IDdata[IDdata$day==1,waketime])
+  for(i in 2:n.nights){
+    IDdata.sl <- cbind(IDdata.sl,
+                       onset_n.night = IDdata[IDdata$day==i,bedtime],
+                       wakeup_n.night = IDdata[IDdata$day==i,waketime])
+    colnames(IDdata.sl) <- gsub("n\\.night",i,colnames(IDdata.sl)) }
+  
+  sleepLog <- rbind(sleepLog,IDdata.sl) }
+
+# toglie data dallo sleeplog (lascia solo orario)
+for(item in 2:ncol(sleepLog)){
+  sleepLog[,item] <- substr(sleepLog[,item],12,19) 
+  sleepLog[,item][sleepLog[,item]==""] <- "00:00:00" }
+
+# mostra lo sleeplog
+sleepLog
+
+# esporta lo sleeplog
+write.csv(sleepLog,file="sleeplog.csv",row.names=FALSE)
+```
+
+<br>
+
+Adesso che abbiamo il nostro "*sleep log*", possiamo usare l'algoritmo di scoring del sonno implementato nel pacchetto `GGIR`. 
+
+Per prima cosa, creiamo una **sottocartella `\sleep`** nella nostra cartella principale, mentre torniamo nella cartella `\data` per **rinominare i file .CWA con i codici dei partecipanti** (gli stessi che stanno nel nostro dataset!).
+
+Dopodiché possiamo eseguire questo codice. Richiederà un po' di tempo :)
+```{r eval=FALSE}
+library(GGIR)
+
+# processing acc data in week
+GGIR(
+  datadir="data", # cartella che include i file di dati esportati dal bracciale
+  outputdir="sleep", # sottocartella dove esporterà i dati (va creata!)
+  loglocation = "sleeplog.csv", 
+  overwrite=FALSE,
+  ignorenonwear = FALSE, # (def: TRUE)
+  includenightcrit = 10,
+  save_ms5raw_format = "csv", # how data should be stored (def: "RData")
+  part5_agg2_60seconds = TRUE # aggregate epochs to 60 sec (def: FALSE)
+)
+```
+<br>
+
+Ecco fatto! Ora importiamo i parametri del sonno stimati dall'algoritmo:
+```{r }
+# importo dati processati (misure del sonno)
+sleep <- read.csv(
+  "sleep/output_data/results/QC/part4_nightsummary_sleep_full.csv"
+  )[,c("ID","calendar_date", # participant, night and date
+                  "sleeponset_ts","wakeup_ts", # sleep onset & wake up time
+                  "SptDuration", # SPT
+                  "SleepDurationInSpt", # TST in in hours
+                  "WASO", # WASO in hours
+                  "number_of_awakenings")] # nWASO
+
+# rinomino variabili
+colnames(sleep) <- c("ID","date","SO","wakeUp","SPT","TST","WASO","nWASO")
+
+# calcolo Sleep Efficiency = TST / SPT
+sleep$SE <- round(100 * sleep$TST / sleep$SPT, 2)
+
+# tolgo il formato dei file dal codice partecipante
+sleep$ID <- gsub("\\.cwa","",sleep$ID)
+
+# date come data
+sleep$date <- as.Date(sleep$date)
+
+# creo colonna day
+for(id in unique(sleep$ID)){
+  sleep$day[sleep$ID==id] <- 1:nrow(sleep[sleep$ID==id,]) }
+sleep <- sleep[,c(1,ncol(sleep),2:(ncol(sleep)-1))]
+
+# mostro dataset
+sleep
+```
+
+<br>
+
+Ecco i nostri **parametri del sonno**!
+
+- `SO` (*sleep onset*): orario di addormentamento
+
+- `wakeUp`: orario di risveglio
+
+- `SPT` (*sleep period time*): numero totale di ore (o minuti) da `SO` a `wakeUp`
+
+- `TST` (*total sleep time*): numero di ore all'interno del `SPT` che sono state classificate come sonno
+
+- `WASO` (*wake after sleep onset*): numero di ore all'interno del `SPT` che sono state classificate come veglia
+
+- `nWASO`: numero di (micro-)risvegli
+
+- `SE` (*sleep efficiency*): percentuale di `SPT` classificato come sonno = `TST` / `SPT` $\times$ 100
+
+<br>
+
+## 1.7. Attività fisica
+
+L'algoritmo usato qui sopra per il sonno permette anche di stimare i **livelli di attività fisica** sulla base dell'intensità dei movimenti registrati, distinguendo tra (1) Sedentaria/Inattività, (2) Attività leggera e (3) Attività moderata e vigorosa. 
+
+Ecco il codice per importare questi dati:
+```{r }
+# codici usati per classificare i livelli di attività fisica
+act.codes <- read.csv(list.files(paste0("sleep/output_data/meta/ms5.outraw"),
+                                 pattern="behavioralcodes",
+                                 full.names = TRUE))
+
+# leggo i dati
+paths <- list.files("sleep/output_data/meta/ms5.outraw/40_100_400",
+                    full.names=TRUE)
+for(path in paths){
+  id <- gsub("_T5A5\\.RData","",strsplit(path,"/")[[1]][6]) # id partecipante
+  load(path) # leggo dati
+  for(i in 1:nrow(sleep[sleep$ID==id,])){
+    
+    sleep$act.inactive[sleep$ID==id & sleep$day==i] <-
+      nrow(mdat[mdat$timestamp >= as.POSIXct(sleep[i,"date"]) & 
+                  mdat$timestamp <= as.POSIXct(sleep[i,"date"]) &
+                  mdat$invalidepoch==0 &
+                     mdat$class_id %in% 
+                     act.codes[grepl("IN",act.codes$class_name),"class_id"],])
+    
+    sleep$act.light[sleep$ID==id & sleep$day==i] <-
+      nrow(mdat[mdat$timestamp >= as.POSIXct(sleep[i,"date"]) & 
+                  mdat$timestamp <= as.POSIXct(sleep[i,"date"]) &
+                  mdat$invalidepoch==0 &
+                     mdat$class_id %in% 
+                     act.codes[grepl("LIG",act.codes$class_name),"class_id"],])
+    
+    sleep$act.MVPA[sleep$ID==id & sleep$day==i] <-
+      nrow(mdat[mdat$timestamp >= as.POSIXct(sleep[i,"date"]) & 
+                  mdat$timestamp <= as.POSIXct(sleep[i,"date"]) &
+                  mdat$invalidepoch==0 &
+                     mdat$class_id %in% 
+                     act.codes[grepl("MOD",act.codes$class_name) |
+                              grepl("VIG",act.codes$class_name) |
+                              grepl("MVPA",act.codes$class_name),"class_id"],]) }}
+
+# mostro dati
+sleep
+```
+
+<br>
+
+## 1.8. Dati pressione
+
+Per i dati della pressione sarebbe ideale rinominarli come `SBP` (sistolica) e `DBP` (diastolica) e verificarne la plausibilità visualizzandone la distribuzione.
+```{r eval=FALSE}
+#########################################################################
+############################ MODIFICA QUI ###############################
+#########################################################################
+SBP <- "SISTOLICA" # nome variabile pressione sistolica
+DBP <- "DIASTOLICA" # nome variabile pressione diastolica
+#########################################################################
+#########################################################################
+
+# visualizzare la distribuzione
+hist(d$SBP)
+hist(d$DBP)
+```
+
+<br>
+
+## 1.9. Dataset "esteso"
+
+Finora abbiamo usato un dataset con forma "lunga", cioé con una riga per ogni BEEP. Invece noi vogliamo lavorare con un dataset in forma "estesa" con una riga per ogni giorno, così possiamo mettere in relazione le variabili misurate nei vari BEEP di uno stesso giorno. Ecco il codice per farlo:
+```{r }
+# selezionare eventuali variabili comuni a tutti i BEEP (sennò lasciare vuoto "")
+common <- c("")
+
+# nome prima variabile unica del beep 1
+b1.1 <- "QualSonno"
+
+# nome ultima variabile unica del beep 1
+b1.2 <- "QualSonno"
+
+# nome prima variabile unica del beep 2
+b2.1 <- "JobDemand"
+
+# nome ultima variabile unica del beep 2
+b2.2 <- "JobDemand"
+
+# nome prima variabile unica del beep 3
+b3.1 <- "Burnout"
+
+# nome ultima variabile unica del beep 3
+b3.2 <- "Burnout"
+
+# dividere il dataset rinominando le variabili in comune
+
+# BEEP 1
+b1 <- d[d$beep==1,c(1,which(colnames(d)=="day"),which(colnames(d)%in%common), 
+              which(colnames(d)==b1.1):which(colnames(d)==b1.2))]
+colnames(b1)[which(colnames(b1)%in%common)] <- paste0(common,"_beep1")
+
+# ATTENZIONE! SE VOGLIAMO METTERE IN RELAZIONE UNA VARIABILE DEL GIORNO i
+# CON UNA DEL GIORNO i+1 (ES.QUALITà SONNO), DOBBIAMO SOTTRARRE 1 AL NUMERO
+# DEL GIORNO PER IL BEEP CORRISPONDENTE
+b1$day <- b1$day - 1
+
+# BEEP 2
+b2 <- d[d$beep==2,c(1,which(colnames(d)=="day"),which(colnames(d)%in%common), 
+              which(colnames(d)==b2.1):which(colnames(d)==b2.2))]
+colnames(b2)[which(colnames(b2)%in%common)] <- paste0(common,"_beep2")
+
+# BEEP 3
+b3 <- d[d$beep==3,c(1,which(colnames(d)=="day"),which(colnames(d)%in%common), 
+              which(colnames(d)==b3.1):which(colnames(d)==b3.2))]
+colnames(b3)[which(colnames(b3)%in%common)] <- paste0(common,"_beep2")
+
+# BEEP 4 ?
+
+# unisco i dataset in base a ID e day
+wide <- plyr::join(b1,
+                   plyr::join(b2,b3,
+                              by=c("ID","day"),type="full"),
+                   by=c("ID","day"),type="full")
+
+# se hai solo 2 BEEP:
+wide <- plyr::join(b1,b2,by=c("ID","day"),type="full")
+
+# adding variables to filter missing data
+esm_wide[,c("aft","eve","mor")] <- 0
+esm_wide[!is.na(esm_wide$workHours),"aft"] <- 1
+esm_wide[!is.na(esm_wide$ee1),"eve"] <- 1
+esm_wide[!is.na(esm_wide$ht1),"mor"] <- 1
+esm_wide[,c("aft","eve","mor")] <- # identification variables as factors
+  lapply(esm_wide[,c("aft","eve","mor")],as.factor)
+
+# sorting by ID and day
+esm_wide <- esm_wide[order(esm_wide$ID,esm_wide$day),]
+
+# summary
+summary(esm_wide[,c("aft","eve","mor")])
+```
+
+<br>
+
+Infine, dobbiamo unire il dataset con le misure accelerometriche con quello che include le nostre misure self-report. Prima di eseguire il codice qui sotto, accertati che ci sia corrispondenza tra i valori delle variabili `ID` e `day` tra i due dataset!
+```{r }
+d[,c("ID","day","Date")]
+sleep[,c("ID","day","date")]
+
+# unisco i dataset
+
+```
+
+## 1.10. Centratura delle variabili
 
 # 2. Analisi
 
