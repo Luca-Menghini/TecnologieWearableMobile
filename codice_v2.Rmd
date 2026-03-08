@@ -1,0 +1,1735 @@
+---
+title: "Gestire e prevenire lo stress lavorativo con tecnologie wearable e mobile"
+subtitle: |
+ | Esercitazione 3: 
+ | Pre-processamento, analisi e visualizzazione dati con R
+author: "Luca Menghini"
+date: |
+ | 6 marzo 2026 
+ |
+ | ***
+ |
+ | Corso di laurea triennale in Scienze e Tecniche di Psicologia Cognitiva, Università di Trento
+ |
+ | A.A. 2025-2026
+output: 
+ html_document:
+    df_print: paged
+    toc: true
+    toc_float: true
+    toc_depth: 6
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# NOTA: QUESTO CHUNK SERVE PER FAR FUNZIONARE IL DOCUMENTO
+# NON CANCELLARLO MA NON SERVE CHE LO ESEGUI
+```
+
+<br>
+
+Nel presente documento, vediamo i passaggi fondamentali dall'esportazione dei dati alla creazione di grafici e report:
+
+1. **Pre-processamento**: \newline Esportazione, lettura e rielaborazione di dati longitudinali intensivi, cenni di psicometria
+
+2. **Analisi**: \newline Principali tecniche di analisi descrittive visualizzazione di dati longitudinali intensivi
+
+3. **Report**: \newline Spunti e template per report individuali e di gruppo
+
+<br>
+
+Per qualsiasi dubbio, non esitare a scrivere nel forum di Moodle o a scrivermi a luca.menghini@unipd.it !
+
+<br>
+
+# 1. Pre-processamento
+
+Il pre-processamento dei dati riguarda tutti i passaggi necessari per **trasformare i dati** dal formato con cui sono stati registrati nella piattaforma di raccolta (es. m-Path) a quello richiesto dalle analisi che intendiamo fare:
+
+1. Esportazione dati
+
+2. Lettura dei dati
+
+3. Ricodifica dati
+
+4. Proprietà psicometriche
+
+5. Calcolo dei punteggi compositi
+
+6. Integrazione dati wearable
+
+7. Dataset "esteso"
+
+8. Centratura delle variabili
+
+<br>
+
+## 1.1. Esportazione dati
+
+Segui i passaggi sulla guida online per esportare i dati
+https://github.com/Luca-Menghini/TecnologieWearableMobile
+
+## 1.2. Lettura dati
+
+### m-path
+
+Nel passo successivo, dobbiamo importare in R i dati che abbiamo salvato nella cartella `data`. Ovviamente l'importazione dei dati dipende dal loro formato e da quanti file abbiamo. Vediamo qui di seguito i passi per importare in R i file XLSX esportati da https://m-path.io/:
+
+1. __Importare file singolo__: Per importare un singolo file XLSX possiamo usare la funzione `read_xlsx()` del **pacchetto `readxl`** (nota: se non l'hai installato ti darà errore! In tal caso, vai sul menu "Tools" in alto > "Install packages" e scrivi il nome del pacchetto) e salvarne il risultato associandolo all'oggetto `d` con il simbolo `<-`:
+
+```{r read_m-path_single, message=FALSE}
+# svuota lo spazio di lavoro
+rm(list=ls())
+
+######################################## MODIFICA QUI ########################
+##############################################################################
+id <- "P1" # inserisci qui il nome del tuo (primo) partecipante
+# nota: deve essere lo stesso nome del primo file XLSX nella cartella "data"
+##############################################################################
+##############################################################################
+
+# apre pacchetto necessario per leggere file con formato XLSX
+library(readxl) # se ti d
+
+# legge il file nella cartella data e lo salva nell'oggetto "d"
+d <- read_xlsx(paste0("data/",id,".xlsx"),skip=1)
+
+# aggiunge campo codice partecipante (per consistenza con i prossimi step)
+d <- cbind(ID="S1",d)
+
+# mostra le prime 6 righe
+head(d)
+```
+
+2. __Importare file multipli__: Per importare file multipli (cioé un file separato per ogni partecipante) e unirli in un unico dataset, dopo aver rinominato ogni file con il nome/codice del partecipante, possiamo usare il codice qui sotto (nota: se hai solo 1 partecipante, il risultato sarà lo stesso del chunk qui sopra).
+
+```{r read_mpath_multiple, message=FALSE}
+# salva i nomi di tutti i percorsi ai file XLSX nella cartella data
+paths <- list.files("data",pattern="xlsx",full.names=TRUE)
+
+# legge tutti i dati e li salva nell'oggetto "d"
+d <- data.frame(matrix(nrow=0,ncol=ncol(read_xlsx(paths[1]))+1))
+for(path in paths){ # per ogni file...
+  # legge nuovi dati
+  new <- cbind(ID=gsub("data\\/","",gsub("\\.xlsx","",path)), # ID partecipante
+               read_xlsx(path,skip=1)) # legge dati partecipante
+  # aggiunge colonne mancanti
+  if(colnames(d)[1]!="X1"){
+    new[,colnames(d)[!colnames(d) %in% colnames(new)]] <- NA 
+    d[,colnames(new)[!colnames(new) %in% colnames(d)]] <- NA }
+  # aggiunge i nuovi dati ai dati già letti
+  d <- rbind(d,new) }
+
+# mostra tutto il dataset
+d # scorri in basso per vedere gli altri partecipanti
+```
+
+<br>
+
+### Accelerometri
+
+Per stimare le **misure di sonno e attività fisica** a partire dai dati accelermoetrici misurati sul polso (ovvero un valore di movimento misurato 64 volte al secondo sugli assi X, Y e Z) vanno applicate specifiche procedure che si basano sull'assunto: "*sonno = assenza di movimento*" (con i limiti che abbiamo visto).
+
+In particolare, useremo un **algoritmo per lo scoring del sonno** ([Van Hees et al., 2018](https://www.nature.com/articles/s41598-018-31266-z)) che si basa sull'intensità dei movimenti per classificare ogni epoca da 1 minuto come sonno o veglia. In questo modo, si creano dei periodi più o meno lunghi con una serie di epoche di sonno consecutive, chiamati "**periodi di intattività**" (es. sonno ma anche stare fermi e rilassati senza muoversi). Va notato che l'algoritmo *non* utilizza gli orari del sonno auto-riferiti dai partecipanti nell'identificazione del periodo di sonno (*sleep time period*), visto che nessuno di voi li ha misurati :)
+
+Questo può comportare delle distorsioni nell'identificazione dell'inizio del sonno, che talvolta viene "confuso" con periodi a riposo (es. guardare la TV sul divano), quindi dobbiamo valutare i risultati con cautela.
+
+<br>
+
+Si comincia!
+
+Torniamo nella cartella `\data` per **rinominare i file .CWA con i codici dei partecipanti** (gli stessi valori inclusi nella variabile `ID` nel nostro dataset!). Inoltre, creiamo una **sottocartella `\sleep`** (vuota) nella nostra cartella principale "progetto-wearable".
+
+Dopodiché, possiamo eseguire questo codice per applicare l'algoritmo sui nostri dati accelerometrici (cioé sui valori di movimento nell'asse X, Y e Z che abbiamo registrato 64 volte al secondo). Richiederà un po' di tempo :)
+Nota: come sopra, se non hai installato il pacchetto `GGIR` devi andare sul menu "Tools" in alto > "Install packages" e inserire il nome del pacchetto.
+```{r sleep_scoring,eval=FALSE}
+library(GGIR)
+
+GGIR(
+  datadir="data", # cartella che include i file di dati esportati dal bracciale
+  outputdir="sleep", # sottocartella dove esporterà i dati (va creata!)
+  ignorenonwear = FALSE, includenightcrit = 10,  save_ms5raw_format = "csv", 
+  part5_agg2_60seconds = TRUE )
+```
+
+<br>
+
+Ecco fatto! Ora importiamo i parametri del sonno stimati dall'algoritmo:
+```{r read_sleep}
+# importo dati processati (misure del sonno)
+sleep <- read.csv(
+  "sleep/output_data/results/QC/part4_nightsummary_sleep_full.csv"
+  )[,c("ID","calendar_date", # participant, night and date
+                  "sleeponset_ts","wakeup_ts", # sleep onset & wake up time
+                  "SptDuration", # SPT
+                  "SleepDurationInSpt", # TST in in hours
+                  "WASO", # WASO in hours
+                  "number_of_awakenings")] # nWASO
+
+# rinomino variabili
+colnames(sleep) <- c("ID","Date","SO","wakeUp","SPT","TST","WASO","nWASO")
+
+# calcolo Sleep Efficiency = TST / SPT
+sleep$SE <- round(100 * sleep$TST / sleep$SPT, 2)
+
+# SO e wakeUp come variabili temporali
+sleep$SO <- as.POSIXct(paste(Sys.Date() + 
+                               ifelse(substr(sleep$SO,1,1)=="0",1,0),sleep$SO))
+sleep$wakeUp <- as.POSIXct(paste(Sys.Date()+1,sleep$wakeUp))
+
+# tolgo il formato dei file dal codice partecipante
+sleep$ID <- gsub("\\.cwa","",sleep$ID)
+
+# date come data
+sleep$Date <- as.Date(sleep$Date)
+
+# creo colonna day
+for(id in unique(sleep$ID)){
+  sleep$day[sleep$ID==id] <- 1:nrow(sleep[sleep$ID==id,]) }
+sleep <- sleep[,c(1,ncol(sleep),2:(ncol(sleep)-1))]
+
+# mostro dataset
+sleep
+```
+
+<br>
+
+Ecco i nostri **parametri del sonno**!
+
+- `SO` (*sleep onset*): orario di addormentamento
+
+- `wakeUp`: orario di risveglio
+
+- `SPT` (*sleep period time*): numero totale di ore (o minuti) da `SO` a `wakeUp`
+
+- `TST` (*total sleep time*): numero di ore all'interno del `SPT` che sono state classificate come sonno
+
+- `WASO` (*wake after sleep onset*): numero di ore all'interno del `SPT` che sono state classificate come veglia
+
+- `nWASO`: numero di (micro-)risvegli
+
+- `SE` (*sleep efficiency*): percentuale di `SPT` classificato come sonno = `TST` / `SPT` $\times$ 100
+
+<br>
+
+Ma non è finita qui!
+
+L'algoritmo usato qui sopra per il sonno permette anche di stimare i **livelli di attività fisica** sulla base dell'intensità dei movimenti registrati (e l'ha già fatto quando abbiamo lanciato quel chunk GGIR che ci ha messo tantissimo). Ecco il codice per importare questi dati (clicca su "play"):
+
+```{r read_activity}
+# codici usati per classificare i livelli di attività fisica
+act.codes <- read.csv(list.files(paste0("sleep/output_data/meta/ms5.outraw"),
+                                 pattern="behavioralcodes",
+                                 full.names = TRUE))
+
+# leggo i dati
+paths <- list.files("sleep/output_data/meta/ms5.outraw/40_100_400",
+                    full.names=TRUE)
+for(path in paths){
+  id <- gsub("_T5A5\\.RData","",strsplit(path,"/")[[1]][6]) # id partecipante
+  load(path) # leggo dati
+  for(i in 1:nrow(sleep[sleep$ID==id,])){
+    
+    # INATTIVITA'
+    sleep$act.inactive[sleep$ID==id & sleep$day==i] <-
+      nrow(mdat[mdat$timestamp >= as.POSIXct(sleep[i,"Date"]) & 
+                  mdat$timestamp <= as.POSIXct(sleep[i,"Date"]) + 24*60*60 &
+                  mdat$invalidepoch==0 &
+                     mdat$class_id %in% 
+                     act.codes[grepl("IN",act.codes$class_name),"class_id"],]
+           )/60
+    
+    # ATTIVITA' LEGGERA
+    sleep$act.light[sleep$ID==id & sleep$day==i] <-
+      nrow(mdat[mdat$timestamp >= as.POSIXct(sleep[i,"Date"]) & 
+                  mdat$timestamp <= as.POSIXct(sleep[i,"Date"]) + 24*60*60 &
+                  mdat$invalidepoch==0 &
+                     mdat$class_id %in% 
+                     act.codes[grepl("LIG",act.codes$class_name),"class_id"],]
+           )/60
+    
+    # ATTIVITA' MODERATA O VIGOROSA
+    sleep$act.MVPA[sleep$ID==id & sleep$day==i] <-
+      nrow(mdat[mdat$timestamp >= as.POSIXct(sleep[i,"Date"]) & 
+                  mdat$timestamp <= as.POSIXct(sleep[i,"Date"]) + 24*60*60 &
+                  mdat$invalidepoch==0 &
+                     mdat$class_id %in% 
+                     act.codes[grepl("MOD",act.codes$class_name) |
+                              grepl("VIG",act.codes$class_name) |
+                              grepl("MVPA",act.codes$class_name),"class_id"],]
+           )/60 }}
+
+# mostro dati
+sleep[,c("ID","day","Date","act.inactive","act.light","act.MVPA")]
+```
+
+<br>
+
+Ecco i nostri parametri di attività fisica!
+
+- `act.inactive` = numero di ore classificate come "inattività" (o attività sedentaria, cioé ci sono pochi moviementi)
+
+- `act.light` = numero di ore classificate come "attività fisica leggera" (es. camminare, salire le scale, ecc.)
+
+- `MVPA` = numero di ore classificate come "attività fisica moderata o vigorosa" (*moderate or vigorous physical activity*) (es. fare sport, sollevare carichi pesanti, zappare, ecc.)
+
+<br>
+
+### Qs preliminare
+
+L'inserimento di un questionario preliminare implica la necessità di **unire diversi dataset** (quello del questionario preliminare con quello dei questionari giornalieri codificati qui sopra) facendo attenzione di collegare le misure raccolte dallo stesso partecipante. Per farlo è fondamentale che entrambi i dataset abbiano una **colonna `ID`** con i codici dei partecipanti, che devono avere gli stessi valori nei due dataset (es. "P1", "P2", "P3", ecc.).
+
+Di seguito vediamo l'importazione delle risposte al qs preliminare (ma dipende dal formato esportato in base alla piattaforma che avete usato!) e la loro unione al dataset `d` con le risposte ai questionari giornalieri.
+Nota: se non hai usato un questionario preliminare, cancella questa parte e vai avanti.
+
+```{r read_prelqs, message=FALSE}
+# importo le risposte al qs preliminare (nota: dipende dal formato del file!)
+prelqs <- read.csv2("data/questionario-preliminare/prelqs.csv")
+
+# visualizzo le risposte
+prelqs # la colonna ID deve avere gli stessi valori del dataset giornaliero!
+
+# unisco i due dataset sulla base della colonna ID
+library(plyr)
+d <- plyr::join(d,prelqs,by="ID",type="left")
+
+# mostro il dataset (scorri alla fine per vedere le colonne del prelqs)
+d
+```
+
+<br>
+
+## 1.3. Ricodifica dati
+
+Una volta importati i dati, procediamo alla loro ricodifica per prepararli per le analisi successive:
+
+1. __Pulizia nomi variabili__: con questo codice ripuliamo i nomi delle variabili dalle informazioni aggiuntive di m-path, lasciando solo il nome che avevamo impostato sulla piattaforma.
+```{r short_colnames, message=FALSE}
+# mostra nomi variabili originali
+colnames(d)
+
+# per ogni variabile, prende solo la prima parola
+for(i in 1:ncol(d)){
+  colnames(d)[i] <- strsplit(colnames(d)[i],split=" ")[[1]][1] }
+
+# mostra i nuovi nomi delle variabili
+colnames(d)
+```
+
+2. __Variabile `day`__: con questo codice ricodifichiamo la variabile `Date` per calcolare il giorno di partecipazione `day` da 1 = primo giorno a 7 = settimo giorno.
+```{r , message=FALSE}
+# converte variabile "Date" da testo a data e ora
+for(i in 1:12){ d$Date <- gsub(month.abb[i],i,d$Date) }
+d$Date <- as.POSIXct(substr(d$Date, # recording date
+                            6,nchar(d$Date)),format="%d %m %Y %H:%M:%S")
+
+# calcola variabile "day"
+for(id in unique(d$ID)){
+  d$day[d$ID==id] <- 
+    difftime(d$Date[d$ID==id],
+             as.Date(min(d$Date[d$ID==id])),units="days") + 1 }
+d$day <- as.integer(d$day) # converto in classe "integer"
+
+# mostra esempi
+head(d[,c("ID","Date","day")])
+```
+
+<br>
+
+3. __Variabile `beep`__: se il nostro protocollo prevede **più di una misurazione al giorno**, con questo codice creiamo la variabile `beep` con un valore diverso in base al numero progressivo di misurazioni previste (es. 1 = mattina, 2 = pomeriggio, 3 = sera).
+```{r beep, message=FALSE}
+# NOTA: questo codice richiede che ci sia almeno 1 variabile misurata
+# soltanto in un dato questionario e non negli altri questionari
+# (cioé ogni questionario deve avere almeno 1 variabile "unica")
+# Se non è così, allora devi modificare i file excel creando una nuova 
+# variabile (es. "var_1", "var_2", ecc.) in cui aggiungete un valore (es. 1)
+# SOLO nelle righe corrispondenti ad un dato questionario (es. solo mattina)
+
+###############################################################################
+################################################ MODIFICA QUI #################
+# indica qui il nome di una variabile presente SOLO nel PRIMO questionario
+var_t1 <- "sd1"
+
+# indica qui il nome di una variabile presente SOLO nel SECONDO questionario
+var_t2 <- "jd1" 
+
+# indica qui il nome di una variabile presente SOLO nel TERZO questionario
+var_t3 <- "ee1" # nota: lascia il campo vuoto ("") se hai solo 2 questionari
+###############################################################################
+###############################################################################
+
+# crea variabile "beep"
+d$beep <- ifelse(!is.na(d[,var_t1]),1, 
+                 ifelse(!is.na(d[,var_t2]),2,
+                        ifelse(!is.na(d[,var_t3]),3,NA)))
+d[,c("ID","day","beep",var_t1,var_t2,var_t3)] # mostra variabili
+
+# # se avevi solo 2 BEEP, cancella le righe qui sopra e usa questo codice
+# # toglendo i "#" all'inizio di ogni riga
+# d$beep <- ifelse(!is.na(d[,var_t1]),1, 
+#                  ifelse(!is.na(d[,var_t2]),2,NA))
+# d[,c("ID","day","beep",var_t1,var_t2)] # mostra variabili
+```
+
+<br>
+
+4. __Classi delle variabili__ [QUESTA PARTE E' NUOVA, NON L'ABBIAMO FATTO IN CLASSE]: Siccome R usa delle "classi" per capire se una variabile è quanitativa, categoriale, testuale, ecc., usiamo questo codice per assicurarci che riconosca correttamente le nostre variabili:
+```{r classes, message=FALSE}
+########################## MODIFICA QUI #######################################
+######## sostituisci con i nomi delle tue variabili ###########################
+####### (sempre tra virgolette e separate da virgola) #########################
+###############################################################################
+
+# colnames(d) # per leggere i nomi delle variabili nel dataset:
+
+# 1) INTEGERS = variabili quantitative con numeri interi 1, 2, 3, 4, ecc.
+# es. item questionari (anche slider), day, beep
+INTEGERS <- c("jd1","jd2","jd3","ee1","ee2","ee3","sd1","sd2","sd3","sd4",
+              "day","beep")
+
+# 2) NUMERIC = variabili quantitative con la virgola 0.43, 166.54, 10203.3, ecc.
+# es. pressione sanguigna, ore lavorative, ore di sonno
+NUMERICS <- c("Sist","Diast","workHours")
+
+# 3) FACTOR = variabili categoriali con un numero definito di classi (o "livelli")
+# es. genere con livelli F/M/Altro, variabili Sì/No
+FACTORS <- c("teleWork","genere")
+
+# 4) CHARACTER = variabili testuali (es. domanda a risposta aperta)
+# IMPORTANTE: NON MODIFICARE LE VARIABILI "ID" e "Date"
+CHARACTERS <- c() # lascia vuoto se non ne hai
+
+###############################################################################
+###############################################################################
+
+# questo codice cambia i livelli delle variabili
+d[,INTEGERS] <- lapply(d[,INTEGERS],as.integer)
+d[,NUMERICS] <- lapply(d[,NUMERICS],as.numeric)
+d[,FACTORS] <- lapply(d[,FACTORS],as.factor)
+d[,CHARACTERS] <- lapply(d[,CHARACTERS],as.character)
+
+# mostra la struttura del dataset
+str(d)
+```
+<br>
+
+5. __Variabili invertite__: Se il nostro questionario includeva delle domande formulate in modo opposto a quello che avevamo in mente di misurare (es. item su problemi di sonno per misurare la qualità del sonno), possiamo **invertire il punteggio** sottraendolo al valore massimo della scala + 1. Ad esempio, qui vediamo il codice per invertire 4 item con punteggio da 1 a 7 (1 diventa 7, 2 diventa 6, 3 diventa 5, 4 resta 4, 5 diventa 3, 6 diventa 2, 7 diventa 1):
+```{r reversed, message=FALSE}
+# inverti le variabili (nota: cancella questo codice e vai avanti se non hai
+# nessun variabile da invertire)
+d$sd1 <- 7 + 1 - d$sd1
+d$sd2 <- 7 + 1 - d$sd2
+d$sd3 <- 7 + 1 - d$sd3
+d$sd4 <- 7 + 1 - d$sd4
+```
+
+<br>
+
+6. __Pulizia livelli variabili categoriali__: Infine, come abbiamo fatto sopra per i nomi delle variabili, possiamo accorciare i nomi dei livelli presenti in eventuali variabili categoriali
+```{r factor_levels, message=FALSE}
+# mostra i livelli della variabile teleWork
+unique(d$teleWork)
+
+# sostituisco livello 1 con "remote" 
+d$teleWork <- gsub("Sì\\, ho lavorato da remoto",
+                   "remote",
+                   d$teleWork)
+
+# sostituisco livello 2 con "onsite"
+d$teleWork <- gsub("No\\, ho lavorato prevalentemente nel mio luogo di lavoro",
+                   "onsite",
+                   d$teleWork)
+
+# Attenzione a mettere sempre \\ prima di punti e virgole!
+
+# trasformo in classe "factor" 
+d$teleWork <- factor(d$teleWork,levels=c("remote","onsite"))
+
+# vediamo il numero di casi
+summary(d$teleWork)
+```
+
+<br>
+
+## 1.4. Proprietà psicometriche
+
+\fontsize{8pt}{12}\selectfont
+Prima di analizzare i nostri dati, è opportuno valutare alcune **qualità psicometriche** delle misure utilizzate per accertarci che 'funzionino' come dovrebbero:
+
+- __Validità__ (*Validity*): Il test misura ciò che dovrebbe misurare?
+
+- __Attendibilità__ (*Reliability*): Il test fornisce misure consistenti?
+
+<br>
+
+### Validità (*validity*)
+
+\fontsize{8pt}{12}\selectfont
+Il test misura ciò che dovrebbe misurare? \newline
+
+Indicatori qualitativi:
+
+- __Validità di facciata__ (pre): rilevanza del test per le persone non esperte (solitamente la popolazione target del test)
+
+- __Validità di contenuto__ (post): grado in cui la formulazione degli item riflette il dominio di contenuto del costrutto misurato
+
+Indicatori quantitativi:
+
+- __Validità di criterio__ (pre/post): correlazione con un criterio esterno o un altro test già considerato valido
+
+- __Validità di costrutto__ (pre/post): grado in cui il test misura ciò che dovrebbe misurare (analisi fattoriale: saturazioni degli item e dimensionalità)
+
+- __Validità convergente/divergente__ (pre/post): correlazione alta con test che misurano lo stesso costrutto, bassa con test che misurano costrutti diversi
+
+<br>
+
+### Attendibilità (*reliability*)
+
+\fontsize{8pt}{12}\selectfont
+Il test fornisce misure affidabili? L'attendibilità fa riferimento alla stima di quanto la variabilità nelle misure ottenute sia dovuta alla 'varianza vera' ($\sigma^2_V$) del costrutto misurato anziché alla 'varianza d'errore' ($\sigma^2_E$): $\sigma^2_{Tot} = \sigma^2_V + \sigma^2_E$
+
+- __Inter-rater__: congruenza delle valutazioni espresse da due o più valutatori indipendenti (osservatori) - solo per etero-valutazioni
+
+- __Test-retest__: congruenza tra le misurazioni ottenute dagli stessi individui in tempi diversi (solo per costrutti 'stabili')
+
+- __Split-half__: correlazione tra due parti dello stesso test (ha senso solo se c'è un certo numero di item)
+
+- __Consistenza/Coerenza interna__: correlazioni tra gli item che compongono il test (es. correlazione media, correlazione item-totale, $\alpha$ di Cronbach)
+
+<br>
+
+In particolare, l'attendibilità delle scale self-report (i.e., misure composte da più item che misurano lo stesso costrutto/dimensione) viene spesso quantificata in termini di **coerenza interna** della scala (quanto gli item della scala sono correlati tra loro).
+
+- __Misure retrospettive__: spesso valutate tramite la correlazione media tra gli item e il coefficiente $\alpha$ di Cronbach. Quest'ultimo stima il rapporto tra varianza 'vera' e varianza totale. Valori > .70 sono considerati indicativi di un'adeguata attendibilità
+
+- __Misure ESM__: indici di attendibilità alternativi che tengono in cosiderazione le due componenti che caratterizzano queste misure: quella 'stabile' (**tratto**) che valutata confrontando i punteggi medi dei partecipanti, e quella 'variabile' (**stato**) che valutata confrontando le deviazioni delle specifiche osservazioni dalla media dei partecipanti
+
+<br>
+
+Qui vediamo il codice per calcolare gli indici di attendibilità delle nostre misure giornaliere (nota: solo per misure quantitative dove più item sono stati usati per misurare lo stesso costrutto/dimensione):
+
+- $R_{kF}$: Attendibilità nel discriminare sistematiche differenze individuali (*between-subjects*), in base a tutte le misure disponibili per ogni soggetto
+
+- $R_C$: Sensibilità al cambiamento = Attendibilità nel discriminare sistematiche differenze intra-individuali (*within-subject*) nel tempo
+
+```{r multi_reliability, warning=FALSE}
+###############################################################################
+################################################ MODIFICA QUI #################
+###############################################################################
+items <- c("jd1","jd2","jd3") # seleziona gli item della scala
+
+# NOTA: QUESTA COSA SI PUò FARE PER TUTTE LE SCALE CHE INCLUDONO 2 O PIù ITEM:
+# BASTA COPIARE E INCOLLARE SOTTO TUTTO IL CHUNK DI CODICE E CAMBIARE I NOMI
+# DEGLI ITEM
+###############################################################################
+###############################################################################
+
+# calcolo indici di attendibilità livello-specifici
+library(psych)
+multilevel.reliability(
+  
+  x = d, grp = "ID", Time = "day", items = items
+  
+  )[c("RkF","Rc")]
+```
+
+<br>
+
+__Cosa fare se una misura non risulta attendibile?__
+
+\fontsize{10pt}{12}\selectfont
+Quando una misura non risulta adeguatamente attendibile nel campione considerato (es. indice di attendibilità $< .70$), possiamo:
+
+1. Escludere la misura dalle nostre analisi (questa sarebbe la scelta più saggia, visto che la misura "non ha funzionato bene" nel nostro campione)
+
+2. Includerla lo stesso nelle analisi ma evidenziare questo limite nel report, indicando di interpretare con particolare cautela i risultati relativi a questa misura
+
+<br>
+
+## 1.5. Calcolo punteggi compositi
+
+Quando utilizziamo delle misure che includono due o più indicatori (es. scale self-report con due o più item, biosegnali registrati più volte nel tempo), possiamo aggregarne i valori calcolando il **punteggio composito** (solitamente il punteggio medio o la somma) per ogni osservazione.
+
+Questo va fatto per ogni scala multi-item (ovviamente non per quelle ad item singolo).
+```{r composite_scores, warning=FALSE}
+################################################### MODIFICA QUI ##############
+###############################################################################
+items <- c("jd1","jd2","jd3") # seleziona gli item della scala
+nome_scala <- "JobDemand" # imposta qui il nome della variabile
+# nota: questa cosa si può fare per tutte le scale che includevano 2 o più item
+# Basta copiare e incollare la parte che va da "MODIFICA QUI" A "FINE"
+###############################################################################
+###############################################################################
+
+# calcola punteggio composito
+d[,nome_scala] <- apply(d[,items],1,mean)
+
+# FINE
+
+# mostra esempi
+d[,c("ID","day","beep",items,nome_scala)]
+
+# ripeto per le altre scale (nota: vanno cambiati i nomi delle variabili!)
+items <- c("ee1","ee2","ee3") # burnout
+nome_scala <- "Burnout"
+d[,nome_scala] <- apply(d[,items],1,mean)
+items <- c("sd1","sd2","sd3","sd4") # qualità del sonno
+nome_scala <- "QualSonno"
+d[,nome_scala] <- apply(d[,items],1,mean)
+d[,c("ID","day","beep","JobDemand","Burnout","QualSonno")] # mostra esempi
+```
+
+<br>
+
+## 1.6. Qualità dati wearable
+
+Validità e attendibilità sono concetti che fanno parte della *Teoria Classica dei Test* e si applicano principalmente al testing psicologico (misure self-report), mentre per le misure fisiologiche e comportamentali andrebbero valutati altri aspetti principalmente riferiti alla **qualità dei dati** (es. plausibilità dei valori ottenuti, artefatti nel segnale, ecc.) e al **confronto con metodi gold-standard** (che però nel nostro caso non abbiamo). 
+
+Di seguito valutiamo la **plausibilità** dei valori di pressione arteriosa e dei parametri del sonno che abbiamo misurato, confrontandoli con dei valori "normativi" che prendiamo da altri campioni più grandi. Oltre a permetterci di identificare eventuali valori anomali (*outlier*), questo ci permette anche di farci un'idea se il nostro "soggetto" o "campione" presenta valori ridotti, elevati o allineati con quelli di un campione "normativo" (che potrebbe essere rilevante per il report!).
+
+<br>
+
+### Pressione arteriosa
+
+Il codice qui sotto visualizza la distribuzione di valori di pressione sistolica e diastolica confrontandoli con la mediana (il "centro" della distribuzione) e il 78° percentile (che delimita i valori più elevati della distribuzione) riportati da Weisser et al (2000) sulla base di un campione di 503 adulti sani in Svizzera (linee rosse tratteggiate).
+```{r warning=FALSE, message=FALSE, fig.width=6, fig.height=2}
+library(ggplot2)
+
+#########################################################################
+############################ MODIFICA QUI ###############################
+#########################################################################
+SBP <- "Sist" # nome variabile pressione sistolica nel tuo dataset
+DBP <- "Diast" # nome variabile pressione diastolica nel tuo dataset
+#########################################################################
+#########################################################################
+
+# mi accerto ancora una volta che siano di classe numeric
+d[,c(SBP,DBP)] <- lapply(d[,c(SBP,DBP)],as.numeric)
+
+# visualizzare la distribuzione della pressione sistolica
+ggplot(d,aes_string(SBP)) + geom_histogram() + 
+  xlab("Pressione sistolica (mmHg)") + ylab("Numero di casi") +
+  geom_vline(xintercept=c(120,140),lty=2,color="red")
+
+# visualizzare la distribuzione della pressione diastolica
+ggplot(d,aes_string(DBP)) + geom_histogram() + 
+  xlab("Pressione sistolica (mmHg)") + ylab("Numero di casi") +
+  geom_vline(xintercept=c(80,90),lty=2,color="red")
+```
+
+<br>
+
+*Commento*: Nel mio dataset (ma il tuo potrebbe essere diverso!) si notano dei valori relativamente alti di pressione sistolica e dei valori nettamente bassi di pressione diastolica, rispetto ai valori normativi (linea rossa tratteggiata). In partioclare notiamo dei valori implausibili: 250 mmHg per la sistolica (troppo alto!) e 40 mmHg per la diastolica (troppo basso!), probabilmente dovuti ad errori di misurazione.
+
+Con questo codice eliminiamo questi casi implausibili:
+```{r eval=FALSE, warning=FALSE, message=FALSE, fig.width=6, fig.height=3}
+d[,SBP][!is.na(d[,SBP]) & d[,SBP]>200] <- NA
+d[,DBP][!is.na(d[,DBP]) & d[,DBP]<50] <- NA
+```
+
+<br>
+
+### Parametri sonno
+
+Qui facciamo la stessa cosa per i parametri del sonno misurati con l'accelerometro, che confrontiamo con i quartili (25%, 50% e 75% della distribuzione) rilevati da [Cellini et al. (2020)](https://doi.org/10.1080/07420528.2020.1773494) su un campione di 82 studenti universitari che hanno indossato un actigrafo per 7 giorni consecutivi (non sarebbe il migliore campione di riferimento se stessimo valutando dei lavoratori più anziani, ma per il nostro "campione simulato" vanno benissimo!).
+```{r warning=FALSE, message=FALSE, fig.width=6, fig.height=2}
+library(ggplot2)
+
+# visualizzare la distribuzione di TST
+ggplot(sleep,aes(TST)) + geom_histogram() + xlim(0,12) +
+  xlab("Tempo totale di sonno (ore)") + ylab("Numero di casi") +
+  geom_vline(xintercept=c(5.808,6.633,7.417),lty=2,color="red")
+
+# visualizzare la distribuzione di WASO
+ggplot(sleep,aes(WASO)) + geom_histogram() + xlim(0,4) +
+  xlab("Tempo di veglia dopo l'addormentamento (ore)") + ylab("Numero di casi")+
+  geom_vline(xintercept=c(0.5833,0.8500,1.1083 ),lty=2,color="red")
+
+# visualizzare la distribuzione di SE
+ggplot(sleep,aes(SE)) + geom_histogram() + xlim(50,100) +
+  xlab("Efficienza del sonno (%)") + ylab("Numero di casi") +
+  geom_vline(xintercept=c(83.70,87.22,90.22 ),lty=2,color="red")
+
+# visualizzare la distribuzione di SO (orario di addormentamento)
+ggplot(sleep,aes(SO)) + geom_histogram() + 
+  scale_x_datetime(date_labels="%H:%M",date_breaks = "2 hours",
+                   limits=c(as.POSIXct(paste(Sys.Date(),"21:00:00")),
+                            as.POSIXct(paste(Sys.Date()+1,"6:00:00")))) +
+  xlab("Orario di addormentamento (hh:mm)") + ylab("Numero di casi") +
+  geom_vline(xintercept=as.POSIXct(c(
+    paste(Sys.Date()+1,c("00:03:00","00:51:00","02:04:00")))),
+             lty=2,color="red")
+
+# visualizzare la distribuzione di wakeUp (orario di risveglio)
+ggplot(sleep,aes(wakeUp)) + geom_histogram() + 
+  scale_x_datetime(date_labels="%H:%M",date_breaks = "2 hours",
+                   limits=c(as.POSIXct(paste(Sys.Date()+1,"06:00:00")),
+                            as.POSIXct(paste(Sys.Date()+1,"12:00:00")))) +
+  xlab("Orario di risveglio (hh:mm)") + ylab("Numero di casi") +
+  geom_vline(xintercept=as.POSIXct(c(
+    paste(Sys.Date()+1,c("07:40:00","08:30:00","09:41:00")))),
+             lty=2,color="red")
+```
+
+*Commento:* Nel mio dataset (ma il tuo potrebbe essere diverso!) non risultano grandi discrepanze rispetto ai valori normativi, sebbene il tempo totale di sonno (TST) e, di conseguenza l'efficienza del sonno, siano un po' più bassi, così come gli orari di risveglio sono mediamente più anticipati rispetto a quelli del campione normativo. Non si notano casi anomali (*outlier*)
+
+<br>
+
+## 1.7. Dataset "esteso"
+
+Finora abbiamo usato un dataset con forma "lunga", cioé con una riga per ogni BEEP. Invece noi vogliamo lavorare con un dataset in forma "estesa" con una riga per ogni giorno, così possiamo mettere in relazione le variabili misurate nei vari BEEP di uno stesso giorno. Ecco il codice per farlo e salvare il nuovo "dataset esteso" con il nome `wide`:
+```{r }
+######################################## MODIFICA QUI #########################
+###############################################################################
+
+# seleziona tutte le variabili in comune a tutti i questionari giornalieri
+common = c("Sist","Diast") # nel mio caso ho misurato la pressione sempre
+# common <- "" # lascia vuoto se non hai variabili in comune
+
+# inserisci i nomi di tutte le variabili "uniche" del primo questionario
+vars.b1 = c("QualSonno") # (io ne ho solo una la mattina)
+# nota: se come nel mio caso hai aggregato degli item in una punteggio composito
+# allora puoi inserire direttamente il nome della var. composita e tralasciare
+# quello dei singoli item
+
+# inserisci i nomi di tutte le variabili "uniche" del secondo questionario
+vars.b2 = c("JobDemand","teleWork")
+
+# inserisci i nomi di tutte le variabili "uniche" del terzo questionario
+vars.b3 = c("Burnout") # (io ne ho solo una)
+# nota: se hai solo 2 questionari cancella queste ultime due righe e vai avanti
+
+# ULTIMO STEP IMPORTANTE: Nel tuo dataset ci sono delle variabili che pensavi
+# di mettere in relazione a quelle misurate nel giorno precedente?
+# (ad es. la qualità del sonno valutata la mattina con lo stress valutato ieri)
+# SE Sì, allora dobbiamo spostare indietro di 1 giorno le misure di quel questionario,
+# altrimenti andremo a vedere se il sonno di ieri influenza lo stress di oggi.
+# IMPOSTA QUI IL N. DEL QUESTIONARIO CHE VUOI SPOSTARE AL GIORNO PRECEDENTE
+qs_giorno.dopo = 1 # per me è il primo = questionario mattina
+# SE INVECE NEL TUO CASO FILA TUTTO DRITTO, ALLORA METTI ZERO:
+# qs_giorno.dopo = 0
+
+###############################################################################
+###############################################################################
+
+# isola risposte BEEP 1 e rinomina variabili comuni (es. Sist_beep1)
+b1 <- d[d$beep==1,c(1:2,which(colnames(d)=="day"),which(colnames(d)%in%common), 
+                    which(colnames(d)%in%vars.b1))]
+colnames(b1)[which(colnames(b1)%in%common)] <- paste0(common,"_beep1")
+if(qs_giorno.dopo==1){ b1$day <- b1$day - 1 }
+
+# isola risposte BEEP 2 e rinomina variabili comuni (es. Sist_beep2)
+b2 <- d[d$beep==2,c(1,which(colnames(d)=="day"),which(colnames(d)%in%common), 
+              which(colnames(d)%in%vars.b2))]
+colnames(b2)[which(colnames(b2)%in%common)] <- paste0(common,"_beep2")
+if(qs_giorno.dopo==2){ b2$day <- b2$day - 1 }
+
+# isola risposte BEEP 3 e rinomina variabili comuni (es. Sist_beep3)
+b3 <- d[d$beep==3,c(1,which(colnames(d)=="day"),which(colnames(d)%in%common), 
+              which(colnames(d)%in%vars.b3))]
+colnames(b3)[which(colnames(b3)%in%common)] <- paste0(common,"_beep3")
+if(qs_giorno.dopo==3){ b3$day <- b3$day - 1 }
+# nota: se hai solo 2 BEEP cancella queste ultime righe
+
+# unisco i dataset in base a ID e day
+wide <- plyr::join(b1,
+                   plyr::join(b2,
+                              b3,
+                              by=c("ID","day"),
+                              type="full"),
+                   by=c("ID","day"),
+                   type="full")
+
+# # se hai solo 2 questionari cancella le ultime righe qui sopra e usa queste:
+# wide <- plyr::join(b1,
+#                    b2,
+#                    by=c("ID","day"),
+#                    type="full")
+
+# aggiustamenti finali (x tutti)
+wide <- wide[order(wide$ID,wide$day),] # ordina per ID e day
+for(i in which(is.na(wide$Date))){ # sistema valori mancanti variabile Date
+  wide$Date[i] <- 
+    d$Date[d$ID==wide$ID[i] & d$day==wide$day[i] & !is.na(d$Date)][1] }
+
+# se hai incluso anche variabili da un questionario preliminare "prelqs"
+# qui le uniamo al dataset wide (altrimenti cancella questa riga!)
+wide <- plyr::join(wide,prelqs,by="ID")
+
+# mostra il dataset
+wide
+```
+
+Ecco fatto! Adesso i valori di tutte le variabili misurate in un dato giorno `day` sono riportate nella stessa riga del dataset e possiamo analizzare le loro relazioni giornaliere. Attenzione che le variabili in comune a più questionari hanno un nome diverso in base al BEEP (es. "Sist_beep1", "Sist_beep2", ecc.)
+
+<br>
+
+Infine, dobbiamo unire al nostro dataset "esteso" le variabili misurate con altri metodi/sistemi/piattaforme. In primo luogo, se hai esportato i dati di un **questionario preliminare** nella sezione 1.1, con questo codice li uniamo al nostro dataset `wide` (**Nota: se non hai i dati del qs preliminare, cancella questo chunk e vai avanti!**).
+```{r join_prelqs}
+# unisce variabili qs preliminare al dataset wide
+wide <- plyr::join(wide,prelqs,by="ID")
+
+# mostra il dataset
+wide # scorri a destra per vedere le variabili del qs preliminare
+```
+
+<br>
+
+Infine, dobbiamo aggiungere le **misure accelerometriche** (se le hai misurate), che abbiamo chiamato `sleep` e che è già in formato "esteso" con una riga per giorno (**Nota: se non hai queste misure, cancella questa parte e vai avanti**). Prima di farlo, dobbiamo:
+
+1. Accertarci che i valori della variabile `ID` siano gli stessi nei 2 dataset `wide` e `sleep`, cioé che non ci siano codici presenti solo in un dataset ma non nell'altro (in tal caso meglio sistemare i file excel di input!).
+```{r check_ID}
+# controlla se i valori di ID sono uguali
+if(any(!unique(sleep$ID)%in%unique(wide$ID)) | 
+   any(!unique(wide$ID)%in%unique(sleep$ID))){ cat("C'è qualche problema! :(") 
+  } else { "Tutto ok! ;)" }
+```
+
+<br>
+
+2. Sincronizzare la variabile `day` tra i dataset `wide` e `sleep`. Infatti al momento questa variabile va da 1 = data della prima misurazione a *n* = data dell'ultima misurazione, ma non è detto che la data di inizio della registrazione col bracciale coincida con quella della prima risposta ai questionari m-path. Premi il tasto "play" per eseguire questo codice e sincronizzare i dati.
+```{r check_day}
+# sincronizzo variabile day del dataset "sleep" con quella del dataset "wide"
+sleep$day <- NA
+for(id in unique(sleep$ID)){
+  for(i in which(wide$ID==id)){
+    sleep$day[sleep$ID==id & sleep$Date==as.Date(substr(wide$Date[i],1,19))
+    ] <- wide$day[i] }
+  if(is.na(sleep$day[sleep$ID==id][1])){
+    for(i in which(sleep$ID==id)[2]:max(which(sleep$ID==id))){
+      if(!is.na(sleep$day[i]) & is.na(sleep$day[i-1])){
+        for(j in (i-1):min(which(sleep$ID==id))){
+          sleep$day[j] <- sleep$day[j+1] - 1 }}}
+  } else if(is.na(sleep$day[sleep$ID==id][max(which(sleep$ID==id))])){
+    for(i in which(sleep$ID==id)[
+      nrow(sleep[sleep$ID==id,])-1]:which(sleep$ID==id)[1]){
+      if(!is.na(sleep$day[i]) & is.na(sleep$day[i+1])){
+        for(j in (i+1):max(which(sleep$ID==id))){
+          sleep$day[j] <- sleep$day[j-1] + 1 }}} }}
+```
+
+<br>
+
+Ecco fatto! Adesso possiamo unire il dataset `sleep` con il dataset `wide` in base alle variabili `ID` e `day`, includendo tutti i giorni in cui è stato misurato un valore per almeno uno dei due (ad es. ci potrebbero essere giorni solo con le misure di sonno ma senza misure self-report).
+```{r join_sleep}
+# unisco i dataset
+wide <- plyr::join(wide,sleep,by=c("ID","day"),type="full")
+
+# ordino per ID e day e togliamo "Date"
+wide <- wide[order(wide$ID,wide$day),]
+
+# mostra dataset
+wide # scorri verso destra per vedere le variabili attigrafiche
+```
+
+<br>
+
+## 1.8. Centratura delle variabili
+
+L'ultimo passaggio del pre-processamento dei dati è quello di **centrare le variabili**.
+
+Infatti, quando lavoriamo con misure ripetute, possiamo trasformare i punteggi delle variabili in modo da isolarne due componenti distinte:
+
+1. **Componente _between-subject_**  = parte più "stabile" della variabile ("tratto") che può essere stimata calcolando il punteggio medio per ogni partecipante considerando tutte le sue risposte e i suoi valori (quindi sarà solo 1 valore per ogni partecipante) \fontsize{6.5pt}{12}\selectfont
+
+```{r }
+#########################################################################
+#################### MODIFICA QUI #######################################
+#########################################################################
+# seleziona tutte le variabili QUANTITATIVE che hai misurato per più giorni
+items <- c("JobDemand","Burnout","QualSonno")
+# nota: NON inserire variabili "stabili" (es. età) o categoriali (es. Sì/No)
+#########################################################################
+#########################################################################
+#########################################################################
+
+# calcolo media per partecipante
+means <- aggregate(wide[,items],by=list(wide$ID),mean,na.rm=TRUE)
+colnames(means) <- c("ID",paste0(items,"_media"))
+
+# mostra dataset
+means
+```
+
+*Commento*: Nel mio dataset (ma il tuo potrebbe essere diverso!) soltanto `Burnout` e `QualSonno` sono stati misurati su tutti i parecipanti, mentre il partecipante P2 non ha mai risposto a `JobDmeand`
+
+<br>
+
+2. **Componente _within-subject_**  = parte più "variabile" ("stato") che può essere stimata **centrando i punteggi sulla media** del partecipante, ovvero sottraendo il punteggio medio di ciascun partecipante da tutti i punteggi ottenuti da quel partecipante (\color{blue}3\color{black}) 
+
+```{r }
+# appiccico le medie al dataset "wide"
+wide <- plyr::join(wide,means,by="ID",type="left")
+
+# calcolo variabili centrate sulla media
+for(item in items){
+  wide[,paste0(item,"_centrato")] <- 
+    wide[,item] - wide[,paste0(item,"_media")] }
+
+# mostro esempi
+wide[,c("ID","day",paste0(items[1],c("","_media","_centrato")))]
+```
+
+*Commento*: Come vedi, i valori medi si ripetono su tutte le righe del partecipante, mentre i valori centrati hanno segno positivo quando il punteggio di quel giorno è maggiore della media ("*più alto del solito*") e negativo quando è minore della media ("*più basso del solito*")
+
+<br>
+
+Ecco fatto! Ora che il nostro dataset è pronto, possiamo procedere con le analisi dei nostri dati!
+
+<br>
+
+# 2. Analisi
+
+In questa sezione vedremo come analizzare i dati da un punto di vista principalmente descrittivo e grafico. Anche in questo caso, potrai facilmente adattare il codice al tuo dataset, semplicemente cambiando i nomi delle variabili e cancellando le parti che non si applicano al tuo caso.
+
+<br>
+
+__Quali analisi?__
+
+Quando lavoriamo su un singolo partecipante/cliente o su piccoli gruppi, non ha senso utilizzare **analisi di tipo inferenziale** (cioè mirate a generalizzare i nostri risultati alla popolazione di riferimento) poiché il nostro campione non sarà mai rappresentativo della popolazione. \newline
+
+Al contrario, in questi casi è opportuno svolgere **soltanto analisi di tipo descrittivo** (cioè mirate a descrivere il campione in oggetto). Non stiamo infatti svolgendo una ricerca per verificare delle ipotesi teoriche sulla popolazione, ma siamo piuttosto interessat3 a descrivere il nostro campione, che sarà lo stesso campione su cui dovremo intervenire. 
+
+In altre parole, a noi interessano proprio queste persone e quindi ha senso che ci concentriamo soltanto sul descrivere queste persone.
+
+Quali statistiche descrittive conoscete?
+
+- Tendenza centrale: media, mediana, moda
+
+- Variabilità: varianza, deviazione standard
+
+- Con variabili categoriali (es. genere, domande Sì/No): frequenze e percentuali
+
+- Con misure ripetute: andamento dei dati nel tempo
+
+- Statistiche bivariate: covarianza e correlazione
+
+<br>
+
+## 2.1. Statistiche univariate
+
+Le statistiche univariate descrivono una variabile alla volta. Di seguito troverai quindi il codice da applicare ad ogni singola variabile inclusa nel tuo dataset, a seconda del tipo particolare (es. quantitativo, categoriale, testuale)
+
+<br>
+
+### Tendenza centrale
+
+Gli indici di tendenza centrale (es. media, mediana, moda) possono essere calcolati a livello di gruppo, di singolo partecipante/cliente e anche a livello giornaliero. 
+
+1. Qui selezioniamo le variabili e calcoliamo la **media totale del campione** per ogni variabile.
+```{r }
+######################################## MODIFICA QUI #########################
+###############################################################################
+# inserisci i nomi delle tue variabili QUANTITATIVE misurate per più giorni
+items <- c("JobDemand","QualSonno","Burnout")
+# NON inserire variabili "stabili" (es. età) o categoriali/testuali (es. sì/no)
+# NON inserire variabil di tipo orario
+###############################################################################
+###############################################################################
+
+# Esegui i comandi qui sotto uno alla volta, cliccando sulla prima riga
+# e premendo CTRL + Enter (o su Mac: Command + Enter)
+
+# calcolo media totale nel campione
+for(item in items){ cat("\n-",item,": media =",
+                        round(mean(wide[,item],na.rm=TRUE),2)) }
+```
+
+*Commento*: Nel mio campione, la media delle Job Demands e della Qualità del sonno sono relativamente elevate (superiori al punto centrale della scala di risposta, ovvero 4), mentre il punteggio di Burnout è relativamente basso (inferiore al punto centrale della scala). Nota: non è possibile confrontare le medie di due variabili misurate con scale diverse (es. 1-7 vs. 1-5 oppure Likert vs. mmHg o minuti)
+
+
+<br>
+
+2. Qui calcoliamo la media di ogni variabile per ogni partecipante (che sarà uguale ai valori del punto 1 se hai solo 1 partecipante)
+```{r }
+# calcolo media per partecipante
+aggregate(wide[,items], by = list(wide$ID), mean, na.rm=TRUE)
+```
+
+*Commento*: Nel mio caso, il partecipante P1 ha un punteggio di burnout inferiore a quello dei partecipanti P2 e P3. Il partecipante P2 non ha mai risposto al questionario 2 e quindi non ha un punteggio medio di Job Demands (NaN)
+
+<br>
+
+3. Qui calcoliamo la media in base al giorno di partecipazione (1 = primo giorno di assessiment, 2 = secondo giorno, ecc.).
+```{r }
+# calcolo media per giorno di partecipazione
+aggregate(wide[,items], by = list(wide$day), mean, na.rm=TRUE)
+```
+
+*Commento*: Nel mio caso, il punteggio medio di Job Demand del campione è un po' più basso il giorno 1 rispetto agli altri giorni.  Alcune variabili non hanno nessun punteggio (NaN) in certi giorni perché in quei giorni non sono state misurate su nessun partecipante
+
+<br>
+
+4. Qui calcoliamo la media in base al giorno della settimana (1 = lunedì, 2 = martedì, ecc.).
+```{r }
+# calcolo giorno della settimana e media per giorno
+wide$wday <- factor(substr(weekdays(wide$Date),1,3),
+                    levels=c("lun","mar","mer","gio","ven","sab","dom"))
+aggregate(wide[,items], by = list(wide$wday), mean, na.rm=TRUE)
+```
+
+*Commento*: Nel mio campione, il tempo di sonno `TST` è decisamente più basso il venerdì e il sabato rispetto agli altri giorni della settimana. Alcune variabili non sono state misurate in alcuni giorni (NaN)
+
+<br>
+
+#### Visualizzare le medie 
+
+I **punteggi medi dei partecipanti** possono essere visualizzati come dei semplici punti (non proprio bellissimo da vedere, soprattutto con un solo partecipante!).
+
+```{r visualizzare_medie, fig.width=6,fig.height=2}
+########################################### MODIFICA QUI ######################
+###############################################################################
+# seleziona una variabile di cui hai calcolato la media al punto 1.8
+item <- "QualSonno"
+# scrivi il nome della variabile che verrà stampato sull'asse Y
+titolo_asseY <- "Qualità del sonno media \n (1-7)"
+###############################################################################
+
+# genera grafico
+ggplot(wide[!duplicated(wide$ID),],
+       aes_string(x="ID",y=paste0(item,"_media"),color="ID")) + 
+  geom_point(cex=3) + xlab("Partecipanti") + ylab(titolo_asseY) +
+  ggtitle("Valore/Punteggio medio per partecipante")
+```
+
+*Commento:* Il partecipante P2 ha un valore medio di qualità del sonno inferiore ai partecipanti P1 e P2 (differenze inter-individuali, *between-subjects*)
+
+<br>
+
+I punteggi medi giornalieri possono essere visualizzati come dei punti collegati da linee (nota: ricorda che questo è il **giorno di partecipazione**, quindi 1 = primo giorno di assessment, indipendentemente da quale giorno della settimana).
+
+```{r diff_day, fig.width=8,fig.height=3,warning=FALSE,message=FALSE}
+########################################### MODIFICA QUI ######################
+###############################################################################
+# seleziona una variabile del dataset "wide"
+item <- "QualSonno"
+# scrivi il nome della variabile che verrà stampato sull'asse Y
+titolo_asseY <- "Qualità del sonno \n (1-7)"
+###############################################################################
+
+# genera grafico
+ggplot(aggregate(wide[,item], by = list(wide$day), mean, na.rm=TRUE),
+       aes(x=Group.1,y=x)) + 
+  geom_smooth(size=3,color="lightblue") + geom_point(size=4, color="blue") + 
+  scale_x_continuous(breaks=min(wide$day):max(wide$day)) +
+  xlab("Giorno di partecipazione") + ylab(titolo_asseY) +
+  ggtitle("Valori medi del campione in base al giorno di partecipazione")
+```
+
+*Commento:* In media, nel campione (o nel tuo partecipante se è solo 1) si registra una generale tendenza a riportare punteggi più elevati di Qualità del Sonno mano a mano che avanzano i giorni di partecipazione, ma con una drastica riduzione il quinto giorno (forse dovuta ad un singolo partecipante?)
+
+<br>
+
+Per considerare invece i **giorni della settimana** dobbiamo usare la variabile `wday` creata sopra (1 = Lunedì, 2 = Martedì, ecc.).
+
+```{r diff_wday, fig.width=8,fig.height=3,warning=FALSE,message=FALSE}
+########################################### MODIFICA QUI ######################
+###############################################################################
+# seleziona una variabile del dataset "wide"
+item <- "QualSonno"
+# scrivi il nome della variabile che verrà stampato sull'asse Y
+titolo_asseY <- "Qualità del sonno \n (1-7)"
+###############################################################################
+
+# genera grafico
+ggplot(aggregate(wide[,item],by=list(as.integer(wide$wday)),mean,na.rm=TRUE),
+       aes(x=Group.1,y=x)) + 
+  geom_smooth(size=3,color="lightblue") +
+  geom_point(size=4, color="blue") + 
+  xlab("Giorno della settimana") + ylab(titolo_asseY) +
+  scale_x_continuous(breaks=1:nlevels(wide$wday),labels=levels(wide$wday)) +
+  ggtitle("Valori medi del campione in base al giorno della settimana")
+```
+
+*Commento*: Nel mio campione (ma il tuo potrebbe essere diverso!) l'andamento sui giorni della settimana coincide con quello mostrato sopra per i giorni di partecipazione (per cui c'è corrispondenza tra le due variabili), chiarendo che la fluttuazione verso il basso si è verificata di venerdì
+
+<br>
+
+### Fluttuazioni
+
+Dei grafici analoghi a quelli generati qui sopra possono essere usati per visualizzare le **fluttuazioni intra-individuali** nei punteggi dei partecipanti, ovvero l'andamento nel tempo dei **punteggi centrati sulla media** di ciascun partecipante. Ecco il codice per farlo e per generare un riquadro diverso per ogni partecipante (quindi un unico riquadro se hai solo 1 partecipante):
+
+```{r viz_centered, fig.width=8,fig.height=3,warning=FALSE,message=FALSE}
+########################################### MODIFICA QUI ######################
+###############################################################################
+# seleziona una delle variabili che abbiamo centrato al punto 1.8
+item <- "QualSonno"
+# scrivi il nome della variabile che verrà stampato sull'asse Y
+titolo_asseY <- "Qualità del sonno \n centrata"
+###############################################################################
+###############################################################################
+
+# genera il grafico
+ggplot(wide,aes_string(x=as.integer(wide$wday),y=paste0(item,"_centrato"))) + 
+  geom_smooth(size=2,color="lightblue") +
+  geom_point(size=3, color="blue") + geom_hline(yintercept=0,lty=2) +
+  xlab("Giorno della settimana") + ylab(titolo_asseY) +
+  ggtitle("Fluttuazioni intra-individuali (punteggi centrati)") +
+  scale_x_continuous(breaks=1:nlevels(wide$wday),labels=levels(wide$wday)) +
+  facet_wrap("ID") + theme(axis.text.x=element_text(angle=45))
+```
+
+*Commento:* Al netto delle differenze individuali, tutti i partecipanti presentano una riduzione nei livelli di qualità del sonno il **venerdì notte**, ma possiamo vedere che è il partecipante P1 a "guidare" questa differenza evidenziata sopra per i valori medi del campione.  Inoltre, nel mio campione il partecipante P1 mostra le fluttuazioni più ampie nella qualità del sonno, mentre il partecipante P3 mostra punteggi meno variabili. 
+
+Questo ci dà una prima idea sulla **variabilità intra-individuale** delle misure.
+
+<br>
+
+In particolare, per i **parametri del sonno** registrati con l'accelerometro possiamo generare dei grafici molto informativi (**Nota: se non hai usato l'accelerometro, cancella questo chunk e vai avanti!**)
+```{r viz_sleep, fig.width=8,fig.height=3.5,warning=FALSE,message=FALSE}
+############################################## MODIFICA QUI #################
+#############################################################################
+id <- "P1" # inserisci il nome di uno dei tuoi partecipanti
+#############################################################################
+
+# genera grafico
+ggplot(wide[wide$ID==id,],aes(x=as.integer(wday),y=SPT))  + 
+  # sleep period time
+  geom_smooth(size=2,color="black",se=FALSE,span=0.7) +
+  geom_point(size=3, color="black") +
+  # total sleep time
+  geom_smooth(aes(y=TST),size=2,color="blue",se=FALSE,span=0.7) +
+  geom_point(aes(y=TST),size=3, color="blue") +
+  # wake after sleep onset
+  geom_smooth(aes(y=WASO),size=2,color="red",se=FALSE,span=0.7) +
+  geom_point(aes(y=WASO),size=3, color="red") +
+  # orari di addormentamento e risveglio
+  geom_text(aes(y=SPT+1.6,label=paste0(substr(SO,12,16),"\n",
+                                       substr(wakeUp,12,16)))) +
+  # efficienza del sonno
+  geom_label(aes(y=TST-1,label=paste0(round(SE),"%"))) +
+  
+  ylim(0,11.5) +  geom_hline(yintercept=0,lty=2) +
+  xlab("Giorni della settimana") + ylab("Parametri del sonno (ore)") +
+  ggtitle(paste("Tempo trascorso a letto (nero), tempo totale di sonno (blu) \n e veglia dopo l'addormentamento (rosso) nel partecipante",id)) +
+  scale_x_continuous(breaks=1:nlevels(wide$wday),labels=levels(wide$wday)) +
+  facet_wrap("ID") + theme(axis.text.x=element_text(angle=45))
+```
+
+*Commento:* Nel mio soggetto P1 si nota una certa stabilità negli orari di addormentamento (sempre intorno alle 01:00, tranne il lunedì notte), mentre c'è una maggiore variabilità negli orari di risveglio, con una differenza di circa un'ora tra lunedì, mercoledì e domenica rispetto agli altri giorni. Notiamo che i giorni con orario di risveglio più ritardato (lun, mer, dom) sono anche quelli con durata del periodo di sonno (linea nera) più in linea con quella raccomandata dalle linee guida vigenti (es. l'*American Academy of Sleep Medicine* raccomanda di trascorrere **almeno 7 ore** a letto per notte), con un maggiore tempo totale di sonno (linea blu) e con una maggiore efficienza del sonno.(> 80%). Coerentemente ai dati self-report sulla qualità del sonno, notiamo un decremento nella durata e nell'efficienza del sonno di venerdì notte (ma anche di sabato).
+
+<br>
+
+Una cosa simile la possiamo fare per i **livelli di attività fisica** registrati con l'accelerometro (nota: se non hai usato l'accelerometro, cancella questo chunk e vai avanti!)
+```{r viz_act, fig.width=8,fig.height=3,warning=FALSE,message=FALSE}
+############################################## MODIFICA QUI #################
+#############################################################################
+id <- "P1" # inserisci il nome di uno dei tuoi partecipanti
+#############################################################################
+
+# genera grafico
+ggplot(wide[wide$ID==id,],aes(x=as.integer(wday),y=act.inactive))  + 
+  # sleep period time
+  geom_smooth(size=2,color="blue",se=FALSE,span=0.7) +
+  geom_point(size=3, color="blue") +
+  # total sleep time
+  geom_smooth(aes(y=act.light),size=2,color="orange",se=FALSE,span=0.7) +
+  geom_point(aes(y=act.light),size=3, color="orange") +
+  # wake after sleep onset
+  geom_smooth(aes(y=act.MVPA),size=2,color="red",se=FALSE,span=0.7) +
+  geom_point(aes(y=act.MVPA),size=3, color="red") +
+  
+  geom_hline(yintercept=0,lty=2) +
+  xlab("Giorni della settimana") + ylab("Ore di (in)attività fisica") +
+  ggtitle(paste("Ore di inattività (blu), attività leggera (arancio) e moderata o intensa (rosso) \n nel partecipante",id)) +
+  scale_x_continuous(breaks=1:nlevels(wide$wday),labels=levels(wide$wday)) +
+  facet_wrap("ID") + theme(axis.text.x=element_text(angle=45))
+```
+
+*Commento:* Nel mio soggetto P1, tutti i giorni della settimana (in particolare il lunedì) sono caratterizzati da una prevalenza di inattività (o attività sedentaria, indicata in blu) e da una durata totale di attività moderata o vigorosa (in rosso) molto ridotta (a parte qualche picco il mercoledì e il venerdì). Notiamo inoltre che il *sabato* ci sono praticamnete zero ore di attività totale (questo perché mi sono tolto il bracciale e l'ho lasciato su un tavolo!). Questo andrebbe quindi escluso dalle analisi.
+
+<br>
+
+### Variabilità
+
+Gli indici di variabilità come la varianza e la deviazione standard possono essere calcolati allo stesso modo in cui abbiamo calcolato le medie.
+
+1. Qui selezioniamo le variabili e calcoliamo la **deviazione standard totale del campione** per ogni variabile. Nota: la deviazione standard dipende dal range della scala di misura! Non puoi confrontare 2 variabili con 2 scale diverse (es. 1-5 e 1-7).
+```{r devSt}
+######################################## MODIFICA QUI #########################
+###############################################################################
+# inserisci i nomi delle tue variabili QUANTITATIVE misurate per più giorni
+items <- c("JobDemand","QualSonno","Burnout")
+# NON inserire variabili "stabili" (es. età) o categoriali/testuali (es. sì/no)
+# NON inserire variabil di tipo orario
+###############################################################################
+###############################################################################
+
+# Esegui i comandi qui sotto uno alla volta, cliccando sulla prima riga
+# e premendo CTRL + Enter (o su Mac: Command + Enter)
+
+# calcolo deviazione standard totale nel campione
+for(item in items){ cat("\n-",item,": Deviazione standard =",
+                        round(sd(wide[,item],na.rm=TRUE),2)) }
+```
+
+*Commento:* Le Job Demands e la Qualità del Sonno (che sono state misurate entrambe con una scala da 1 a 7) mostrano una variabilità simile nel campione, mentre il Burnout (misurato sempre da 1 a 7) mostra una variabilità maggiore nel campione. Solo che **non sappiamo quanta di questa variabilità è a livello intra- o inter-individuale!**
+
+<br>
+
+2. Qui calcoliamo la deviazione standard di ogni variabile per ogni partecipante (che sarà uguale ai valori del punto 1 se hai solo 1 partecipante)
+```{r devSt_part}
+# calcolo deviazione standard per partecipante
+aggregate(wide[,items], by = list(wide$ID), sd, na.rm=TRUE)
+```
+
+*Commento*: Nel mio caso, il partecipante P3 ha una variabilità intra-individuale nel punteggio di Qualità del Sonno più bassa rispetto a quella dei partecipanti P1 e P2 (cioé P2 mostra devi punteggi più costanti nel tempo), coerentemente a quanto abbiamo visto nel grafico qui sopra. Alcuni partecipanti non hanno nessun punteggio in alcune variabili, quindi non è possibile calcolare la deviazione standard (NaN).
+
+<br>
+
+3. Qui calcoliamo la deviazione standard in base al giorno di partecipazione (1 = primo giorno di assessiment, 2 = secondo giorno, ecc.).
+```{r devStd_day}
+# calcolo deviazione standard per giorno di partecipazione
+aggregate(wide[,items], by = list(wide$day), sd, na.rm=TRUE)
+```
+
+*Commento*: Nel mio caso, c'è meno variabilità tra i partecipanti nel punteggio di Burnout al giorno 2 rispetto al giorno 1.  Alcune variabili non hanno nessun punteggio in alcuni giorni (NaN)
+
+<br>
+
+4. Qui calcoliamo la deviazione standard in base al giorno della settimana (1 = lunedì, 2 = martedì, ecc.).
+```{r devStd_wday}
+# calcolo eviazione standard per giorno
+aggregate(wide[,items], by = list(wide$wday), sd, na.rm=TRUE)
+```
+
+*Commento*: Nel mio campione, le Job Demands e il Burnout mostrano una maggiore variabilità il lunedì rispetto al martedì. Alcune variabili non sono state misurate in alcuni giorni (NaN)
+
+<br>
+
+#### Visualizzare la variabilità
+
+Per visualizzare la variabilità (insieme alla tendenza centrale) in una o pià distribuzioni di punteggi, possiamo generare dei __grafici a scatola (*boxplot*)__, che mostrano il range di valori in ciascun gruppo di osservazioni localizzando il primo e terzo quartile (i lati inferiore e superiore della scatola) e la mediana (la linea orizzontale all'interno della scatola), a cui aggiungiamo anche la media (la X all'interno della scatola). 
+
+Ad es. qui generiamo un boxplot della variabile `QualSonno` per osservarne la variabilità generale nel campione (considerando tutti i soggetti):
+```{r boxplot_tot, fig.width=8,fig.height=3,warning=FALSE}
+########################################### MODIFICA QUI ######################
+###############################################################################
+# seleziona una variabile del dataset "wide"
+item <- "QualSonno"
+# scrivi il nome della variabile che verrà stampato sull'asse Y
+titolo_asseX <- "Qualità del sonno (1-7)"
+###############################################################################
+###############################################################################
+
+# genera grafico
+ggplot(wide,aes(QualSonno)) + geom_boxplot() +
+  xlab(titolo_asseX) + ggtitle("Boxplot della qualità del sonno") 
+```
+
+<br>
+
+Tuttavia, risulta un po' difficile concludere qualcosa dal boxplot di una singola variabile. Certo, potremmo confrontarlo con quello di altre variabili che usano la stessa scala di risposta (es. slider 1-7), ma di solito lo usiamo soprattutto per confrontare raggruppamenti di osservazioni (boxplot bivariato), ad esempio raggruppate per partecipante:
+```{r boxplot_part, fig.width=8,fig.height=3,warning=FALSE}
+########################################### MODIFICA QUI ######################
+###############################################################################
+# seleziona una variabile del dataset "wide"
+item <- "QualSonno"
+# scrivi il nome della variabile che verrà stampato sull'asse Y
+titolo_asseX <- "Qualità del sonno (1-7)"
+###############################################################################
+###############################################################################
+
+# genera grafico
+ggplot(wide,aes(ID,QualSonno)) + geom_boxplot() +
+  xlab(titolo_asseX) + ggtitle("Differenze tra partecipanti") 
+```
+
+*Commento:* Coerentemente a quanto concluso dai grafici qui sopra, il partecipante P2 ha i valori più bassi rispetto agli altri 2 partecipanti, mentre il partecipante P1 mostra più variabilità intraindividuale (la scatola è più allungata). Da notare che i partecipanti P1 e P2 presentando dei valori estremi (*outlier*, mostrati dai punti fuori dalla scatola).
+
+<br>
+
+Infine, diamo un'occhiata alle differenze tra i giorni della settimana:
+```{r boxplot_day, fig.width=8,fig.height=3,warning=FALSE}
+########################################### MODIFICA QUI ######################
+###############################################################################
+# seleziona una variabile del dataset "wide"
+item <- "QualSonno"
+# scrivi il nome della variabile che verrà stampato sull'asse Y
+titolo_asseX <- "Qualità del sonno (1-7)"
+###############################################################################
+###############################################################################
+
+# genera grafico
+ggplot(wide,aes(wday,QualSonno)) + geom_boxplot() +
+  xlab(titolo_asseX) + ggtitle("Differenze tra giorni della settimana") 
+```
+
+*Commento:* Si conferma che il venerdì è il giorno che presenta la qualità del sonno più bassa, mentre il mercoledì è il giorno con maggiore variabilità tra soggetti e il martedì è quello con meno variabilità.
+
+<br>
+
+### Frequenze e percentuali
+
+Con le variabili di **conteggio** (es. numero di e-mail) o di tipo **categoriale** (es. variabili Sì/No, genere, orario lavorativo vs. extralavorativo, ma anche il codice del partecipante) possiamo calcolare le relative frequenze e percentuali.
+
+Ad es. qui calcoliamo **il numero di risposte e il tasso di risposta** ai questionari sera (burnout) e mattina (QualSonno) sul totale dei questionari previsti dal protocollo (nel mio caso erano 5). Possiamo vedere che i soggetti P2 e P3 hanno risposto ad entrambi i questionari per 4 giorni su 5 (tasso di risposta = 80%) mentre solo P1 ha risposto a tutti i questionari (5 su 5, 100%).
+
+```{r freq_resp}
+############################################ MODIFICA QUI ####################
+##############################################################################
+# ripota una variabile per ogni questionario/strumento
+items = c("Burnout","QualSonno")
+# riporta il numero di giorni in cui hai previsto di misurare queste variabili
+n.days = 5
+##############################################################################
+##############################################################################
+
+# frequenza risposte complete 
+table(na.omit(wide[,c("ID",items)])[,"ID"])
+
+# tasso di risposta (in base al numero di misurazioni previste)
+cat(round(100*table(na.omit(wide[,c("ID",items)])[,"ID"])/n.days,1),"%")
+```
+
+<br>
+
+Invece qui vedo la frequenza e la percentuale di giornate di lavoro da remoto ("remote") e sul luogo di lavoro ("onsite"). **Nota: Se non hai una variabile categoriale (es. Sì/No) nel tuo dataset, cancella questo chunk e vai avanti.**
+
+```{r freq_var}
+############################################ MODIFICA QUI ####################
+##############################################################################
+# ripota una variabile categoriale del tuo dataset
+item <- c("teleWork")
+##############################################################################
+##############################################################################
+
+# frequenza giornate di lavoro da remoto e in azienda
+table(na.omit(wide[,c("ID",item)])[,"teleWork"])
+
+# percentuale giornate di lavoro da remoto e in azienda
+round(100*table(na.omit(wide[,c("ID",item)])[,"teleWork"])/nrow(wide),1)
+```
+
+*Commento:* Nel mio campione, il numero di giorni di lavoro da remoto e di lavoro in ufficio sono praticamente equivalenti, con soltanto un giorno in più di lavoro da remoto.
+
+<br>
+
+#### Visualizzare le frequenze 
+
+In questi casi è indicato usare dei **grafici a barre** (conteggio). 
+
+Qui vediamo la frequenza di risposta per partecipante. **Nota: Se non hai una variabile categoriale (es. Sì/No) nel tuo dataset, cancella questo chunk e vai avanti.**
+
+```{r barplot_resp, fig.width=8,fig.height=3,warning=FALSE}
+############################################ MODIFICA QUI ####################
+##############################################################################
+# ripota una variabile per ogni questionario/strumento
+items <- c("Burnout","QualSonno")
+# riporta il numero di giorni previsti dal tuo protocollo
+n.days <- 5
+##############################################################################
+##############################################################################
+
+# frequenza risposte complete per partecipante
+ggplot(na.omit(wide[,c("ID",items)]),aes(ID)) + geom_bar() +
+  ggtitle("Numero di risposte con valore non mancante alle variabili:",
+          paste(items,collapse=", ")) + 
+  xlab("Partecipante") + ylab("Numero di risposte")
+```
+
+<br>
+
+Qui vediamo invece il numero di casi di lavoro da remoto e in ufficio (nota i casi "NA" sono relativi a giornate in cui questa variabile non è stata misurata oppure il partecipante non ha risposto):
+```{r barplot_freq, fig.width=8,fig.height=3,warning=FALSE}
+############################################ MODIFICA QUI ####################
+##############################################################################
+# ripota una variabile categoriale del tuo dataset
+item <- c("teleWork")
+##############################################################################
+##############################################################################
+
+# frequenza risposte complete per partecipante
+ggplot(wide,aes_string(item)) + geom_bar()  +
+  ggtitle("Numero di risposte per livello della variabile teleWork") + 
+  ylab("Numero di risposte")
+```
+
+<br>
+
+## 2.2. Statistiche bivariate
+
+Le statistiche bivariate descrivono la relazione tra due o più variabili, in base al loro tipo (es. quantitative, categoriali)
+
+<br>
+
+### Covarianza e correlazione
+
+\fontsize{8pt}{12}\selectfont
+Quando vogliamo quantificare (sempre a livello descrittivo) l'associazione tra due variabili QUANTITATIVE (quindi non categoriali o testuali), possiamo calcolarne la covarianza e la correlazione: \fontsize{7pt}{12}\selectfont
+
+- la **covarianza**  \color{blue} $cov(x,y) =\sum(x_i - \overline{x})(y_i-\overline{y})/N$ \color{black} dipende dal valore della varianza di X e Y, quindi dalla scala con cui entrambe le variabili sono state misurate.
+
+- la **correlazione** \color{blue} $cor(x_1,x_2) = \frac{cov(x_1,x_2)}{\sigma^2_{x_1}\sigma^2_{x_2}}$ \color{black} è la versione standardizzata della covarianza e può assumere solo valori tra -1 e 1 (più facile da interpretare della covarianza).
+
+La seconda è quindi più facilmente interpretabile perché non dipende dalla scala di miusra della variabile.
+
+Ecco il codice per calcolare la covarianza e la correlazione su 2 variabili nel tuo dataset:
+```{r corcov2, }
+###################################################### MODIFICA QUI ###########
+###############################################################################
+# inserisci 2 variabili QUANTITATIVE del dataset "wide"
+items <- c("Burnout","QualSonno")
+# nota: NON inserire variabili categoriali, testuali o di orario!
+###############################################################################
+###############################################################################
+
+# COVARIANZA: dipende dalla scala di misura
+round(cov(wide[,items],use="complete.obs"),2)
+
+# CORRELAZIONE: standardizzata da -1 a +1
+round(cor(wide[,items],use="complete.obs"),2)
+```
+
+*Commento:* Nel mio dataset, queste 2 variabili sono correlate *debolmente* e *negativamente*
+
+<br>
+
+Possiamo anche correlare 3 o più variabili per volta, con il vantaggio di poter confrontare il segno e la forza delle correlazioni (cioé possiamo dire che due variabili sono più/meno correlate di altre 2 variabili). **ATTENZIONE:** Verranno considerati soltanto i casi in cui il valore non è mancante in nessuna delle variabili messe in relazione! Ad es. nel mio caso, aggiungendo la variabile `JobDemand` si escluderà il partecipante P2 che non ha mai risposto al questionario 2.
+```{r corcov3, }
+###################################################### MODIFICA QUI ###########
+###############################################################################
+# inserisci 3 o più variabili QUANTITATIVE del dataset "wide"
+items <- c("Burnout","QualSonno","JobDemand")
+# nota: NON inserire variabili categoriali, testuali o di orario!
+###############################################################################
+###############################################################################
+
+# CORRELAZIONE: standardizzata da -1 a +1
+cat("Calcolo correlazioni su",nrow(na.omit(wide[,items])),"osservazioni da",
+    nlevels(as.factor(na.omit(wide[,c("ID",items)])[,"ID"])),"soggetti"
+    ); round(cor(wide[,items],use="complete.obs"),2)
+```
+*Commento:* Job Demands e Burnout sono *fortemente* correlate in modo *positivo*, mentre Job Demands e Qualità del sonno correlano in modo *negativo* e meno forte. Nota: la diagonale è sempre = 1 perché ogni variabile correla perfettamente con se stessa, mentre i valori sono identici sopra e sotto la diagonale.
+
+<br>
+
+__Come interpretare i coefficienti di correlazione__
+
+- In base al segno: (+) associazione diretta, (-) associazione inversa, (0) associazione nulla
+
+- In base alla forza: 
+  - $0.05 \le r < 0.10$: correlazione molto debole (*very small*)
+  - $0.10 \le r < 0.20$: correlazione debole (*small*)
+  - $0.20 \le r < 0.30$: correlazione media (*medium*)
+  - $r \ge 0.30$: correlazione forte (*large*)
+  
+<br>
+
+Funder, D. C., & Ozer, D. J. (2019). Evaluating effect size in psychological research: Sense and nonsense. Advances in Methods and Practices in Psychological Science, 2(2), 156-168.
+
+<br>
+
+
+### Correlazioni livello-specifiche
+
+Finora abbiamo clacolato le correlazioni in generale, senza discriminare tra componente intra- e inter-individuale. 
+
+Tuttavia, quando lavoriamo con misure ripetute, la correlazione tra i punteggi 'grezzi' (non traformati) non è facile da interpretare perché è un mix di correlazione tra soggetti (*between*) ed entro i soggetti (*within*). Per questo, è meglio calcolare le correlazioni separatamente per ciascun livello:
+
+1. Correlazione **tra soggetti (between)**: associazione tra i **punteggi medi dei partecipanti** (quindi 1 valore per ogni partecipante), es. le persone che riportano punteggi mediamente più elevati di `Burnout` la sera riportano anche una `QualSonno` mediamente più ridotta la mattina successiva. **Nota: queste si possono calcolare solo se hai 2 o più soggetti, altrimenti cancella questo chunk e vai avanti**.
+
+```{r cors.between, }
+###################################################### MODIFICA QUI ###########
+###############################################################################
+# inserisci 2 o più variabili QUANTITATIVE del dataset "wide"
+items <- c("Burnout","QualSonno")
+# nota: NON inserire variabili categoriali, testuali o di orario!
+# Se hai solo un partecipante, cancella questo chunk e vai avanti!
+###############################################################################
+###############################################################################
+
+# calcolo punteggi medi per ogni partecipante
+means <- aggregate(wide[,items],by=list(wide$ID),mean,na.rm=TRUE)
+colnames(means) <- c("ID",paste0(items,"_media"))
+
+# calcolo correlazioni between
+cors.between <- round(cor(means[,paste0(items,"_media")],use="complete.obs"),2)
+
+# mostro correlazioni e numerosità campionaria considerata
+cat("Calcolo correlazioni inter-individuali su",
+    nrow(na.omit(means)),"osservazioni da",
+    nlevels(as.factor(as.character(na.omit(means)[,"ID"]))),"soggetti\n"
+    ); cors.between
+```
+*Commento*: A livello **inter-individuale**, nel mio campione si osserva una correlazione *positiva* e *forte* tra Burnout medio e Qualità del Sonno media (le persone che in media riportano punteggi più alti di Burnout riportano anche una Qualità del Sonno media più elevata - il ché non ha molto senso ma forse è perché ho troppi pochi partecipanti!)
+
+<br>
+
+2. Correlazione **entro i soggetti (within)**: associazione tra i **punteggi centrati sulle medie dei partecipanti** (quindi 1 valore per ogni giorno/misurazione), es. La qualità del sonno è *più bassa del solito* (inferiore alla media individuale) in seguito alle serate in cui viene riportato un punteggio di `Burnout` *più alto del solito* (maggiore alla media). **Nota: queste si possono calcolare anche con un partecipante solo, ma se ne hai solo 1 cancella questo chunk e vai a quello successivo.**
+
+```{r cors.within, }
+# Nota 1: qui si usano le stesse variabili selezionate al chunk precedente
+# Nota 2: non serve centrare i punteggi perché lo abbiamo già fatto sopra
+
+# calcolo correlazioni within
+cors.within <- round(cor(wide[,paste0(items,"_centrato")],use="complete.obs"),2)
+
+# mostro correlazioni e numerosità campionaria considerata
+cat("Calcolo correlazioni intra-individuali su",
+    nrow(na.omit(wide[,items])),"osservazioni da",
+    nlevels(as.factor(as.character(na.omit(wide[,c("ID",items)])[,"ID"]))),
+    "soggetti\n"); cors.within
+```
+
+*Commento:* A livello **intra-individuale**, nel mio campione si osserva una correlazione *negativa* e *moderata* tra i punteggi centrati sulla media individuale di Burnout medio e Qualità del Sonno (in media, vengono riportati punteggi di Qualità del Sonno più bassi del solito dopo le sere in cui vengono riportati punteggi di Burnout più alti del solito, che ha senso).
+
+
+<br>
+
+**Se hai solo 1 partecipante, usa questo codice per calcolare le correlazioni intra-individuali, altirmenti (se hai 2 o più partecipanti) cancella questo chunk e vai avanti.**
+```{r cors.within1, }
+###################################################### MODIFICA QUI ###########
+###############################################################################
+# inserisci 2 o più variabili QUANTITATIVE del dataset "wide"
+items <- c("Burnout","QualSonno","JobDemand")
+# nota: NON inserire variabili categoriali, testuali o di orario!
+# Se hai 2 o più partecipanti, cancella questo chunk e vai avanti!
+###############################################################################
+###############################################################################
+
+# calcolo correlazioni within
+cors.within <- round(cor(wide[wide$ID==wide$ID[1],paste0(items,"_centrato")],
+                         use="complete.obs"),2)
+
+# calcolo correlazioni between
+cat("Calcolo correlazioni intra-individuali su",
+    nrow(na.omit(wide[wide$ID==wide$ID[1],items])),"osservazioni da",
+    nlevels(as.factor(as.character(na.omit(wide[wide$ID==wide$ID[1],
+                                                c("ID",items)])[,"ID"]))),
+    "soggetto\n"); cors.within
+```
+
+*Commento:* A livello intra-individuale, il soggetto mostra una correlazione *negativa* e *forte* tra Burnout e Qualità del Sonno centrati (la Qualità del Sonno era più bassa del solito dopo le sere in cui veniva riportato un punteggio di Burnout più alto del solito), mentre entrambe le variabili correlano *positivamente* con Job Demands, con una correlazione più forte per il Burnout.
+
+<br>
+
+#### Visualizzare le correlazioni
+
+Per visualizzare le correlazioni, possiamo usare un **diagramma di calore** che mostra un colore tanto più intenso quanto è maggiore la forza delle correlazioni, usando 2 colori diversi per correlazioni positive e negative (in questo caso rosso e blu). Nota: se hai solo 1 partecipante, vedrai soltanto le correlazioni intra-individuali (sopra la diagonale). Invece, se hai 2 o più partecianti, vedrai sia le correlazioni intra-individuali (sopra la diagonale) sia quelle inter-individuali (sotto la diagonale).
+```{r corplot, warning=FALSE,fig.width=8,fig.height=4}
+###################################################### MODIFICA QUI ###########
+###############################################################################
+# inserisci il numero di partecipanti nel tuo dataset
+n.participants = 3
+# nota: se hai solo un partecipante, inserisci il valore 1
+###############################################################################
+###############################################################################
+
+# preparo matrice di correlazione
+cors <- cors.within
+if(n.participants>1){ cors[lower.tri(cors)] <- cors.between[lower.tri(cors)]
+} else{ cors[lower.tri(cors)] <- NA }
+colnames(cors) <- rownames(cors) <- gsub("_centrato","",items)
+
+# genero grafico
+library(reshape2)
+# Nota: se non hai installato questo pacchetto, puoi farlo con questo codice:
+# install.packages("reshape2")
+ggplot(melt(cors),aes(x=Var1,y=Var2,fill=value)) + geom_tile() +
+  labs(x="",y="") + geom_text(aes(label=value),color="black",size=5)+
+  scale_fill_gradient2(low="darkblue",high="#f03b20",mid="white",midpoint=0,
+                       limit = c(-1,1),space="Lab",name="Correlazioni\ndi Pearson",
+                       guide="legend",breaks=round(seq(1,-1,length.out =11),2),
+                       minor_breaks=round(seq(1,-1,length.out = 11),2))+
+  theme(axis.text.x=element_text(angle=30,hjust = 0.8)) +
+  ggtitle("Correlazioni inter-individuali (sotto la diagonale) \ne intra-individuali (sopra la diagonale)")
+```
+
+*Commento:* Nel mio campione il Burnout mostra una relazione con la Qualità del Sonno di segno opposto tra i due livelli di analisi (negativa a livello intra-individuale e positiva a livello inter-individuale), mentre la sua correlazione con Job Demands risulta più forte a livello intra-individuale (sopra la diagonale) che a livello inter-individuale (sotto la diagonale).
+
+<br>
+
+### Altre statistiche bivariate
+
+\fontsize{8pt}{12}\selectfont
+Altre statistiche bivariate possono essere ottenute calcolando e visualizzando gli indici di tendenza centrale e di variabilità di una **variabile quantitativa** (es. punteggi di `Burnout`, pressione sanguigna, sonno) per ogni livello di una **variabile categoriale** (es. `teleWork`, genere, domande sì/no), proprio come abbiamo fatto sopra per calcolare e visualizzare media e variabilità in base al soggetto o al giorno della settimana. 
+
+```{r bivariate_means, fig.width=10,fig.height=3}
+######################################## MODIFICA QUI #########################
+###############################################################################
+# inserisci i nomi delle tue variabili QUANTITATIVE misurate per più giorni
+items = c("JobDemand","QualSonno","Burnout")
+# NON inserire variabili "stabili" (es. età) o categoriali/testuali (es. sì/no)
+# NON inserire variabil di tipo orario
+
+# inserisci il nome di una delle tue variabili CATEGORIALI misurate per più giorni
+categ = "teleWork"
+# se non hai variabili categoriali, cancella questo chunk e vai avanti
+###############################################################################
+###############################################################################
+
+# calcolo media per livello di teleWork
+aggregate(wide[,items], by = list(wide[,categ]), mean, na.rm=TRUE)
+
+# calcolo deviazione standard per livello di teleWork
+aggregate(wide[,items], by = list(wide[,categ]), sd, na.rm=TRUE)
+```
+
+*Commento:* Nel mio campione, il punteggio medio di *Burnout* risulta leggermente più elevato nelle giornate di lavoro in ufficio rispetto alle giornate di lavoro da remoto, mentre non si osservano differenze sostanziali nei punteggi di Job Demands o di Qualità del sonno. Le Job Demands hanno punteggio più variabile nei giorni di lavoro da remoto.
+
+<br>
+
+Qui visualizziamo gli stessi risultati con i boxplot.
+```{r bivariate_boxplot, warning = FALSE, fig.width=8,fig.height=3}
+# genera grafico
+for(item in items){ clean <- wide[!is.na(wide[,categ]) & !is.na(wide[,item]),]
+  p <- ggplot(clean,aes_string(categ,item)) + 
+    geom_boxplot() +
+  ggtitle(paste("Differenze nei punteggi di",item,"tra i livelli di",categ)) 
+  print(p) }
+```
+
+<br>
+
+### Recap: statistiche descrittive
+
+\fontsize{8pt}{12}\selectfont
+
+- Tendenza centrale: media, mediana, moda
+
+- Variabilità: varianza, deviazione standard
+
+- Fluttuazioni intra-individuali
+
+- Con variabili categoriali (es. genere, domande Sì/No): frequenze e percentuali
+
+- Statistiche bivariate: covarianza e correlazione (variabili quantitative), medie per gruppo (quantitativa x categoriale)
+
+<br>
+
+__Quali analisi e grafici per il mio caso studio?__
+
+Ecco alcuni esempi di analisi e grafici che potrebbero rispondere al caso studio considerato per le esercitazioni: 
+
+- *Qualità dei dati e compliance*: numero totale di partecipanti (se non hai un caso singolo) e osservazioni, numero di osservazioni per partecipante e tasso di risposta &rightarrow; ___I vostri partecipanti sono stati aderenti al protocollo somministrato? Scartereste qualche partecipante o qualche giorno?___
+
+- *Tendenza centrale e variabilità*: media, SD e boxplot per ogni variabile quantitativa &rightarrow; ___Valori medi superiori o inferiori al punto centrale della scala di risposta? (es. 3 in una scala 1-5)? Quali variabili mostrano più variabilità intra-individuale (fluttuazioni nel tempo)?___
+
+- *Eventi e condizioni*: frequenze/percentuali e grafici a barre per mostrare il numero di osservazioni in ciascuna condizione (es. lavoro in presenza vs. remoto, orario lavorativo vs. tempo libero, presenza vs. assenza di altre persone) &rightarrow; ___In quanti casi la persona si trovava esposta alla condizione stressante? Quante volte al giorno?___
+
+- *Correlazioni e fluttuazioni temporali*: correlazioni intra-individuali tra variabili quantitative (es. carico di lavoro, qualità del sonno, burnout) e visualizzazione dell'andamento dei punteggi centrati nel tempo (slide 22) &rightarrow; ___Quali predittori sono maggiormente associati alla variabile di esito considerata?___
+
+<br>
+
+# 3. Report
+
+Una volta che abbiamo processato e analizzato i dati, oltre ad aver generato i grafici che ci interessano, possiamo integrare i nostri risultati in un **report da restituire al committente**. 
+
+<br>
+
+Come strutturereste il vostro report?
+
+<br>
+
+## 3.1. Struttura del report
+
+\fontsize{8pt}{12}\selectfont
+Non c'è un unico modo di strutturare questi report, per cui le sezioni specifiche così come la lunghezza del report dipende dal caso particolare. Tuttavia, possiamo individuare alcuni elementi da inserire in quasi tutti i casi:
+
+- Background e obiettivi (e ipotesi?)
+
+- Metodologia
+
+- Risultati
+
+- Discussione e conclusioni
+
+<br>
+
+### A) Background e obiettivi
+
+
+Breve sintesi della richiesta del committente, del background teorico (teorie e costrutti individuati coerentemente alla richiesta) e degli obiettivi dell'assessment. 
+
+Più raramente (es. assessment per motivi di ricerca), è possibile inserire anche delle ipotesi sulle relazioni attese tra le variabili indagate.
+
+<br>
+
+### B) Metodologia
+
+\fontsize{8pt}{12}\selectfont
+La struttura di questa sezione è solitamente simile a quella di un articolo scientifico, seppure più semplificata e meno dettagliata (target non esperto): \fontsize{7.5pt}{12}\selectfont
+
+- __Partecipanti__: numero dei partecipanti e caratteristiche, come sono stati reclutati/coinvolti nell'assessment (spesso va insieme a Procedura: "Partecipanti e procedura")
+
+- __Procedura__: descrizione del protocollo di assessment (es. numero di giorni, numero di rilevazioni per giorno, variabili misurate in ogni occasione); è consigliabile rappresentare graficamente il protocollo
+
+- __Misure__: descrizione più dettagliata delle misure utilizzate: nome e riferimenti delle scale, specificare se è stata usata la scala originale o un adattamento, proprietà psicometriche; enfatizzare la natura standardizzata delle misure utilizzate
+
+- __Analisi__: breve descrizione delle analisi svolte (es. statistiche descrittive quali indici di tendenza centrale (es. media) e frequenze, correlazioni tra variabili quantitative e grafici sull'andamento delle variabili nel tempo)
+
+<br>
+
+### C) Risultati
+
+\fontsize{8pt}{12}\selectfont
+Questa è solitamente la sezione che interessa di più al committente e dovrebbe essere facilmente comprensibile (es. grafici con didascalia e chiara indicazione delle variabili visualizzate, legenda, titolo, ecc.).
+
+Anche qui non c'è un modo unico di strutturarla, ma è consigliabile inserire dei sottoparagrafi con focus specifico (es. valori medi, fluttuazioni intra-giorno vs. inter-giorni, statistiche bivariate).
+
+All'inizio di questa sezione è consigliabile riportare delle informazioni sulla **qualità dei dati**, come ad esempio il tasso di risposta e il numero di osservazioni escluse (es. partecipanti con basso tasso di risposta).
+
+Regola generale: + grafici, - tabelle ;)
+
+<br>
+
+### D) Discussione e conclusioni 
+
+\fontsize{8pt}{12}\selectfont
+Nella sezione finale del report, possiamo sintetizzare gli **obiettivi** dell'assessment (con le eventuali ipotesi) e la **procedura** utilizzata, per poi fornire un'**interpretazione** più puntuale dei risultati ottenuti e qualche tentativo di **spiegazione** delle relazioni rilevate.  \newline
+
+Es. "*si è osservato che nelle giornate in cui le richieste lavorative erano percepite come più elevate del solito per una data persona, il tono d'umore era più basso del solito. Questo può essere dovuto da ...*
+
+<br>
+
+Altri due elementi importanti di questa sezione sono:
+
+1. __Limiti dell'assessment__: Indicare chiaramente i limiti della metodologia utilizzata (es. uso di misure self-report soggette a distorsioni dovute ad errori di memoria, bias cognitivi, ecc., durata limitata della rilevazione che può rendere i risultati poco generalizzabili; misure risultate poco attendibili)
+
+2. __Indicazioni di intervento__: Un'altra sezione di grande interesse per la committenza a cui dedicare ampio spazio. Qui possiamo proporre diverse strategie di intervento indicando le variabili su cui sarebbe più prioritario intervenire sulla base dei risultati (es. i predittori con associazioni più forti con le variabili dipendenti)
+
+<br>
+
+## 3.2. Altri elementi del report
+
+\fontsize{8pt}{12}\selectfont
+
+- Pagina di copertina (titolo, riferimenti)
+
+- Indice: è buona prassi inserire un indice, soprattutto se il report è lungo
+
+- Executive summary: riassunto (max 1-2 pagine) da mettere all'inizio (simile ad un abstract)
+
+- Appendici: dove riportare tabelle/figure supplementali su aspetti più marginali/specifici
+
+- Riferimenti bibliografici
+
+<br>
+
+## 3.3. Restituzione dei risultati
+
+\fontsize{8pt}{12}\selectfont
+Oltre alla consegna di un **report** finale, la restituzione dei risultati può prevedere altre modalità come un **colloquio** con il committente o una **presentazione** al gruppo di persone valutate o all'intera organizzazione. \newline
+
+In ogni caso, si tratta di momenti delicati da gestire con attenzione, soprattutto in relazione agli **aspetti etici e di privacy**.
+
+<br>
+
+## 3.4. Restituzione individuale
+
+Quando restituiamo i risultati allo stesso **singolo individuo** che ci ha commissionato l'assessment, siamo relativamente liberi di entrare nel dettaglio poiché i dati appartengono alla stessa persona che riceve la restituzione. \newline
+
+Tuttavia va mantenuta la stessa **cautela** di cui si parlava in relazione ai limiti dello studio. Va cioè chiarito in quale grado è possibile fare affidamento sull'assessment per fornire informazioni/indicazioni alla persona e quanto andrebbe invece approfondito con altri approcci/tecniche.
+
+Ad esempio, gli assessment di questo tipo **non sono mai diagnostici**, cioè non possono sostituire una valutazione psicodiagnostica).
+
+<br>
+
+## 3.5. Restituzione di gruppo
+
+Quando invece restituiamo i risultati di un **gruppo di persone**, sia che li restituiamo ad un singolo committente (es. datore di lavoro) sia che li restituiamo al gruppo stesso, dobbiamo prestare particolare attenzione a **non divulgare dati personali**, cioè ad impedire che sia in qualsiasi modo risalire a dei dati (es. risposte, valori fisiologici) rilevati sulla singola persona. \newline
+
+Compatibilmente alla normativa europea sulla protezione dei dati personali (\color{blue} [GDPR  2016/679](https://www.garanteprivacy.it/regolamentoue) \color{black}), al codice deontologico degli psicologi italiani (\color{blue}[link](https://www.psy.it/la-professione-psicologica/codice-deontologico-degli-psicologi-italiani/codice-deontologico-vigente/)\color{black}), nonché alle indicazioni delle Commissione Consultiva Permanente per la Salute e la Sicurezza sul Lavoro in relazione alla valutazione dello stress lavoro-correlato (\color{blue}[link](https://www.lavoro.gov.it/documenti-e-norme/normative/Documents/2010/LC-18novembre2010.pdf)\color{black}), presentiamo i dati **esclusivamente in forma aggregata**, cioè a livello di gruppo (es. valori medi del campione o di sottogruppi) e mai a livello di singolo individuo. \newline
+
+Le modalità di trattamento e di comunicazione dei dati personali andrebbe anche chiarito in un **consenso informato** da sottoporre ai partecipanti prima di iniziare l'assessment.
